@@ -1,0 +1,1230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <!-- viewport-fit=cover makes env(safe-area-inset-*) resolve on iPhone. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'%3E%3Crect width='180' height='180' rx='36' fill='%230B0B0C'/%3E%3Crect x='40' y='90' width='26' height='50' rx='6' fill='%235CE1A6'/%3E%3Crect x='76' y='60' width='26' height='80' rx='6' fill='%235CE1A6'/%3E%3Crect x='112' y='30' width='26' height='110' rx='6' fill='%235CE1A6'/%3E%3C/svg%3E" />
+  <meta name="theme-color" content="#0B0B0C" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="Trax" />
+  <!-- Not black-translucent: same as leanislaw, that style leaves 62px dead space under the
+       tab bar because innerHeight still excludes the status bar. -->
+  <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+  <title>Trax · Prototype</title>
+  <!-- Prototype: everything runs in this file, data lives in this browser (localStorage) and is
+       seeded with dummy data. The real app will be the Next.js project in ../app. -->
+  <style>
+    :root {
+      --bg: #0B0B0C; --s1: #151517; --s2: #1E1E21; --s3: #2C2C31; --line: #232327;
+      --tx: #F4F4F5; --mut: #8E8E93; --dim: #55555B;
+      --acc: #5CE1A6; --acc-ink: #062B1B; --neg: #FF7A7A; --warn: #FFC857;
+      color-scheme: dark;
+    }
+    * { box-sizing: border-box; }
+    /* Pinned shell, never measured — see leanislaw CLAUDE.md. Overscroll locked on both. */
+    html, body { margin: 0; background: var(--bg); overflow: hidden; overscroll-behavior: none; }
+    #root { position: fixed; inset: 0; }
+    body {
+      color: var(--tx); font: 16px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased; -webkit-user-select: none; user-select: none;
+    }
+    button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer;
+      -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+    /* 16px floor stops iOS zooming on focus. */
+    input, select { font: inherit; font-size: 16px; color: var(--tx); -webkit-user-select: text; user-select: text; }
+    .num { font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+    .pos { color: var(--acc); } .neg { color: var(--neg); } .mut { color: var(--mut); } .dim { color: var(--dim); }
+
+    .app { position: relative; height: 100%; display: flex; flex-direction: column; padding-top: env(safe-area-inset-top); }
+    .screen { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 8px 16px 112px; }
+    .tabbar { display: flex; border-top: 1px solid var(--line); background: var(--bg);
+      padding-bottom: env(safe-area-inset-bottom); touch-action: none; }
+    .tab { flex: 1; height: 56px; display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 3px; font-size: 11px; color: var(--mut); }
+    .tab.on { color: var(--tx); } .tab.on svg { color: var(--acc); }
+    .fab { position: absolute; right: 16px; bottom: calc(env(safe-area-inset-bottom) + 72px); width: 60px; height: 60px;
+      border-radius: 30px; background: var(--acc); color: var(--acc-ink); display: grid; place-items: center;
+      box-shadow: 0 8px 24px rgba(0,0,0,.5); z-index: 5; }
+
+    .title { font-size: 28px; font-weight: 700; margin: 8px 0 12px; display: flex; align-items: center; justify-content: space-between; }
+    .hero { padding: 8px 0 16px; }
+    .hero-label { font-size: 13px; color: var(--mut); }
+    .hero-num { font-size: 40px; font-weight: 700; letter-spacing: -0.02em; margin-top: 2px; }
+    .hero-sub { font-size: 13px; color: var(--mut); margin-top: 4px; }
+
+    .seg { display: flex; background: var(--s1); border-radius: 12px; padding: 3px; gap: 2px; }
+    .seg button { flex: 1; height: 36px; border-radius: 9px; font-size: 13px; color: var(--mut); white-space: nowrap; }
+    .seg button.on { background: var(--s3); color: var(--tx); font-weight: 600; }
+
+    .card { background: var(--s1); border-radius: 16px; margin-top: 12px; overflow: hidden; }
+    .row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 16px; min-height: 56px; text-align: left; }
+    .row + .row { border-top: 1px solid var(--line); }
+    .row.sub { padding-left: 32px; min-height: 48px; }
+    .row-main { flex: 1; min-width: 0; }
+    .row-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .row-sub { font-size: 13px; color: var(--mut); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .row-amt { font-weight: 600; white-space: nowrap; text-align: right; }
+    .row-amt small { display: block; font-size: 12px; font-weight: 400; color: var(--mut); }
+    .section-h { display: flex; justify-content: space-between; align-items: baseline; font-size: 13px; color: var(--mut); margin: 20px 4px 0; }
+    .tag { display: inline-block; font-size: 11px; padding: 2px 7px; border-radius: 6px; background: var(--s3); color: var(--mut); margin-left: 6px; vertical-align: 2px; }
+    .stat { display: flex; justify-content: space-between; padding: 6px 16px; font-size: 15px; }
+    .stat:first-child { padding-top: 14px; } .stat:last-child { padding-bottom: 14px; }
+    .stat.total { border-top: 1px solid var(--line); margin-top: 6px; padding-top: 12px; font-weight: 700; }
+    .bar { height: 6px; border-radius: 3px; background: var(--s3); overflow: hidden; margin-top: 8px; }
+    .bar i { display: block; height: 100%; background: var(--acc); border-radius: 3px; }
+    .bar.over i { background: var(--neg); }
+    .empty { text-align: center; color: var(--mut); padding: 40px 16px; font-size: 15px; }
+    .add { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; height: 48px; color: var(--acc); font-weight: 600; }
+    .month-nav { display: flex; align-items: center; gap: 4px; }
+    .icon-btn { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 22px; color: var(--mut); }
+    .note { font-size: 13px; color: var(--mut); margin: 10px 4px 0; display: flex; gap: 6px; align-items: center; }
+
+    .chips { display: flex; gap: 8px; overflow-x: auto; padding: 2px 16px; margin: 0 -16px; scrollbar-width: none; }
+    .chips::-webkit-scrollbar { display: none; }
+    .chip { display: inline-flex; align-items: center; flex: none; height: 36px; padding: 0 14px; border-radius: 18px;
+      background: var(--s2); font-size: 14px; white-space: nowrap; position: relative; }
+    .chip.on { background: var(--acc); color: var(--acc-ink); font-weight: 600; }
+    .chip.ghost { background: none; border: 1px dashed var(--s3); color: var(--mut); }
+    .chip input[type=date] { position: absolute; inset: 0; opacity: 0; width: 100%; }
+    .lbl { font-size: 12px; color: var(--mut); margin: 14px 2px 6px; text-transform: uppercase; letter-spacing: .04em; }
+
+    .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 20; display: flex; flex-direction: column;
+      justify-content: flex-end; animation: fade .15s ease-out; }
+    .panel { background: var(--bg); border-top: 1px solid var(--line); border-radius: 20px 20px 0 0; max-height: 94%;
+      display: flex; flex-direction: column; padding-bottom: env(safe-area-inset-bottom); animation: up .22s ease-out; }
+    .panel.full { height: calc(100% - 10px); max-height: none; }
+    .panel-head { display: flex; align-items: center; justify-content: space-between; min-height: 52px; padding: 0 4px; }
+    .panel-head b { font-size: 16px; }
+    .panel-body { overflow-y: auto; overscroll-behavior: contain; padding: 0 16px 16px; flex: 1; }
+    .link { min-width: 72px; height: 44px; padding: 0 12px; color: var(--acc); font-size: 16px; }
+    .link.danger { color: var(--neg); } .link:disabled { opacity: .4; }
+    @keyframes up { from { transform: translateY(40px); opacity: 0; } }
+    @keyframes fade { from { opacity: 0; } }
+
+    .field { display: flex; align-items: center; justify-content: space-between; gap: 12px; background: var(--s1);
+      border-radius: 12px; padding: 0 14px; min-height: 52px; margin-top: 8px; }
+    .field > span { color: var(--mut); font-size: 15px; flex: none; }
+    .field input, .field select { background: transparent; border: 0; outline: 0; text-align: right; flex: 1; min-width: 0; height: 50px; }
+    .field select { appearance: none; -webkit-appearance: none; direction: rtl; }
+    .input { width: 100%; height: 50px; background: var(--s1); border: 1px solid transparent; border-radius: 12px; padding: 0 14px; outline: 0; }
+    .input:focus { border-color: var(--s3); }
+
+    /* One colour per transaction type, shared by the type chip and the big amount. */
+    .kind-out { --kind: var(--neg); --kind-ink: #2E0808; }
+    .kind-in { --kind: var(--acc); --kind-ink: var(--acc-ink); }
+    .kind-transfer { --kind: #7AB8FF; --kind-ink: #071D33; }
+    /* Custom only appears when editing an older multi-pocket transaction that fits no other type. */
+    .kind-custom { --kind: var(--warn); --kind-ink: #2E2006; }
+    .kind-chip.on { background: var(--kind); color: var(--kind-ink); }
+    .big[class*=kind-] { color: var(--kind); }
+    .big.idle { opacity: .45; }
+    .big { display: block; width: 100%; font-size: 44px; font-weight: 700; text-align: center; padding: 6px 0 10px; }
+    .big .rp { font-size: 20px; color: var(--mut); margin-right: 6px; font-weight: 600; }
+    .amt-field { min-width: 132px; height: 44px; border-radius: 10px; padding: 0 12px; background: var(--s2); text-align: right;
+      font-size: 17px; font-weight: 600; flex: none; }
+    .amt-field.on { box-shadow: inset 0 0 0 2px var(--acc); }
+    .line { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+    .line select { flex: 1; min-width: 0; height: 44px; background: var(--s1); border: 0; border-radius: 10px; padding: 0 10px; }
+    .line .x { width: 36px; height: 44px; color: var(--mut); font-size: 20px; }
+    .sign { width: 44px; height: 44px; border-radius: 10px; background: var(--s2); font-size: 20px; font-weight: 700; flex: none; }
+    .keypad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 8px 12px 0; }
+    .key { height: 50px; border-radius: 12px; background: var(--s1); font-size: 24px; font-weight: 500; }
+    .key:active { background: var(--s3); }
+    .primary { display: block; width: 100%; height: 52px; border-radius: 14px; background: var(--acc); color: var(--acc-ink);
+      font-weight: 700; font-size: 17px; }
+    .primary:disabled { opacity: .5; }
+    .secondary { display: block; width: 100%; height: 48px; border-radius: 14px; background: var(--s1); font-weight: 600; margin-top: 8px; }
+    .secondary.danger { color: var(--neg); }
+    .foot { padding: 10px 12px 8px; }
+
+    .toast { position: fixed; left: 16px; right: 16px; top: calc(env(safe-area-inset-top) + 8px); z-index: 50; background: var(--s3);
+      border-radius: 12px; padding: 12px 14px; font-size: 14px; animation: fade .15s; box-shadow: 0 8px 24px rgba(0,0,0,.5); }
+    .center { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; gap: 12px; text-align: center; }
+    .hero { position: relative; }
+    /* Pocket activity: name | amount | balance after, columns aligned across rows. */
+    .activity, .activity-head { display: grid; grid-template-columns: minmax(0, 1fr) 92px 104px; gap: 8px; }
+    .activity-head { min-height: 36px; font-size: 12px; color: var(--mut); text-align: right; }
+    .activity-head .row-main { text-align: left; }
+    .activity .row-amt { font-size: 15px; }
+    .pills { display: flex; gap: 6px; margin-top: 10px; }
+    .pill { height: 28px; padding: 0 10px; border-radius: 14px; font-size: 13px; color: var(--mut); }
+    .pill.on { background: var(--s2); color: var(--tx); font-weight: 600; }
+    .proto-btn { position: absolute; right: 0; top: 4px; height: 28px; padding: 0 10px; border-radius: 14px;
+      border: 1px dashed var(--s3); color: var(--mut); font-size: 12px; }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="module">
+import { html, render, useState, useEffect, useMemo } from 'https://cdn.jsdelivr.net/npm/htm@3.1.1/preact/standalone.module.js';
+// The monthly budget from the sheet's RAB Bulanan tab; also seeds the dummy data.
+const DEFAULT_BUDGET = [
+  ['Office lunch', 30000, 'Day', 22], ['Office transport', 20000, 'Day', 22], ['Gas/toll', 1000000, 'Month', 1],
+  ['Date', 1000000, 'Month', 1], ['Hobby', 500000, 'Month', 1], ['Spotify', 79900, 'Month', 1],
+  ['Gym', 185000, 'Month', 1], ['Claude', 360000, 'Month', 1],
+];
+const UNITS = ['Month', 'Week', 'Day', 'Time'];
+// Real data for the current month, written by ../backfill/build_backfill.py --embed.
+// When set it replaces the dummy seed below. null = dummy data.
+const BACKFILL = /*BACKFILL*/{"v":4,"source":"Untitled spreadsheet.xlsx · Oct 26","pockets":[{"id":"11982441-c861-44fe-8b27-39cf702190f3","name":"Kos","parent_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","sort":1,"archived":false,"created_at":"2026-10-01T00:00:00Z"},{"id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","name":"BCA","parent_id":null,"sort":0,"archived":false,"created_at":"2026-10-01T00:00:00Z"},{"id":"7156f16e-ed5f-4ece-b413-ccd3e83018f7","name":"Mandiri","parent_id":null,"sort":2,"archived":false,"created_at":"2026-10-01T00:00:00Z"},{"id":"5a506b3f-db51-4fce-8225-eeb6abe9e1ba","name":"Cash","parent_id":null,"sort":3,"archived":false,"created_at":"2026-10-01T00:00:00Z"},{"id":"ee89a9db-a62c-40a8-afe7-33fd9e2a6b43","name":"Gopay","parent_id":null,"sort":4,"archived":false,"created_at":"2026-10-01T00:00:00Z"},{"id":"3958bcbd-d6ae-43a3-8307-ac935482122b","name":"ShopeePay","parent_id":null,"sort":5,"archived":false,"created_at":"2026-10-01T00:00:00Z"},{"id":"ecb59468-80d9-4409-9112-51a3d2afe026","name":"Ovo","parent_id":null,"sort":6,"archived":false,"created_at":"2026-10-01T00:00:00Z"}],"categories":[{"id":"3f70a65f-0378-48f1-a254-ed997945d175","name":"Office lunch","kind":"expense","sort":0,"archived":false,"created_at":"2026-10-01T00:00:00Z"},{"id":"ae290bdd-5d4b-42cc-9d64-e3dc7ad25756","name":"Office transport","kind":"expense","sort":1,"archived":false,"created_at":"2026-10-01T00:00:00Z"},{"id":"d9514b8b-439e-4fee-a7aa-464c305a9332","name":"Gas/toll","kind":"expense","sort":2,"archived":false,"created_at":"2026-10-01T00:00:00Z"},{"id":"8ffb09af-3feb-460f-851a-a62c57bff512","name":"Date","kind":"expense","sort":3,"archived":false,"created_at":"2026-10-01T00:00:00Z"},{"id":"b7c4407d-f5b9-4d9b-be86-90305d2d8eb5","name":"Hobby","kind":"expense","sort":4,"archived":false,"created_at":"2026-10-01T00:00:00Z"},{"id":"72cf0342-5b13-4e55-8e8c-d866f8a4d0e6","name":"Spotify","kind":"expense","sort":5,"archived":false,"created_at":"2026-10-01T00:00:00Z"},{"id":"7558401c-84bc-4372-9ac2-038e0467ab53","name":"Gym","kind":"expense","sort":6,"archived":false,"created_at":"2026-10-01T00:00:00Z"},{"id":"00de6c0d-258c-4bad-8f85-8cf24b373be7","name":"Claude","kind":"expense","sort":7,"archived":false,"created_at":"2026-10-01T00:00:00Z"},{"id":"1cd72f49-bbde-4453-9232-23e58d66d09e","name":"Groceries","kind":"expense","sort":8,"archived":false,"created_at":"2026-10-01T00:00:00Z"},{"id":"9216ebdf-b020-47d9-a42a-f87a88063c19","name":"Lifestyle","kind":"expense","sort":9,"archived":false,"created_at":"2026-10-01T00:00:00Z"},{"id":"5f5e4b19-a069-4983-9927-be131cb979d3","name":"Health","kind":"expense","sort":10,"archived":false,"created_at":"2026-10-01T00:00:00Z"},{"id":"08647979-ccbf-4f5a-9f12-64a8dc30bf74","name":"Admin","kind":"expense","sort":11,"archived":false,"created_at":"2026-10-01T00:00:00Z"},{"id":"4261e44f-a059-4d83-b25f-0aa0faceb7a5","name":"Kos","kind":"expense","sort":12,"archived":false,"created_at":"2026-10-01T00:00:00Z"},{"id":"ff6437ea-c1bf-4190-80ea-676b09228325","name":"Others","kind":"expense","sort":999,"archived":false,"created_at":"2026-10-01T00:00:00Z"},{"id":"6d4fc065-b692-48da-bc47-bdd7b003e565","name":"Salary","kind":"income","sort":100,"archived":false,"created_at":"2026-10-01T00:00:00Z"},{"id":"de5ad481-8a33-4293-b66f-189690d5e6b5","name":"Kos","kind":"income","sort":101,"archived":false,"created_at":"2026-10-01T00:00:00Z"},{"id":"e7434d3e-c699-4540-816a-46c007a1f32d","name":"Others","kind":"income","sort":999,"archived":false,"created_at":"2026-10-01T00:00:00Z"},{"id":"00d71566-66b4-4411-805a-01b9ccbb16c5","name":"AR","kind":"debt","sort":1000,"archived":false,"created_at":"2026-10-01T00:00:00Z"},{"id":"d062c478-06b4-4206-b579-f703f840b0a3","name":"AP","kind":"debt","sort":1001,"archived":false,"created_at":"2026-10-01T00:00:00Z"}],"transactions":[{"id":"d387e2bb-834a-4bbf-a4b5-f6b4ae1cf437","date":"2026-10-01","name":"Opening balance","category_id":null,"created_at":"2026-10-01T08:00:00.001Z","lines":[{"id":"9d888089-ea72-4c9e-bead-38f4f84b661f","pocket_id":"11982441-c861-44fe-8b27-39cf702190f3","amount":3389642.5},{"id":"ea0e34e4-3a3a-4d8a-ab29-b6765bf963f6","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":6433815.93},{"id":"efb28221-a1f4-4cef-8b36-71c130d4d57c","pocket_id":"7156f16e-ed5f-4ece-b413-ccd3e83018f7","amount":194967679.2},{"id":"a0c95de1-1870-4491-a79b-25a2eb6da7fb","pocket_id":"5a506b3f-db51-4fce-8225-eeb6abe9e1ba","amount":700000.0},{"id":"df38ab95-aee4-40f1-8a16-73ec581a1962","pocket_id":"ee89a9db-a62c-40a8-afe7-33fd9e2a6b43","amount":107083.0},{"id":"5ff28698-b34b-49ba-85bb-3da2c0e4692a","pocket_id":"3958bcbd-d6ae-43a3-8307-ac935482122b","amount":48397.0},{"id":"b6f005e7-2590-4c06-a47f-dfc16ef7a860","pocket_id":"ecb59468-80d9-4409-9112-51a3d2afe026","amount":21089.0}]},{"id":"db52b887-b2d2-4c52-91dd-20b4480142c1","date":"2026-10-01","name":"Top up from Kos to BCA","category_id":null,"created_at":"2026-10-01T08:00:00.002Z","lines":[{"id":"a6a08105-1e51-4e42-8d16-3401645758bb","pocket_id":"11982441-c861-44fe-8b27-39cf702190f3","amount":-1982298.0},{"id":"ad5eb4ad-cf3a-48cb-b2d8-3427b169de2f","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":1982298.0}]},{"id":"82c3ff35-b33c-4e33-835c-4f63e8bb1e4f","date":"2026-10-01","name":"Admin","category_id":"08647979-ccbf-4f5a-9f12-64a8dc30bf74","created_at":"2026-10-01T08:00:00.003Z","lines":[{"id":"76c7e891-f187-48f1-b939-dba89b7aa10d","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-6000}]},{"id":"001ec81d-1414-4549-a45a-e96bf6c5927b","date":"2026-10-01","name":"Makan siang mama","category_id":"00d71566-66b4-4411-805a-01b9ccbb16c5","created_at":"2026-10-01T08:00:00.004Z","lines":[{"id":"492c6ef1-dc34-44d5-91b3-3d90bba5a8b9","pocket_id":"3958bcbd-d6ae-43a3-8307-ac935482122b","amount":-32786.0}]},{"id":"d7f5706b-97ec-4bb4-a1d8-c06fa4be66f2","date":"2026-10-01","name":"Makan siang","category_id":"3f70a65f-0378-48f1-a254-ed997945d175","created_at":"2026-10-01T08:00:00.005Z","lines":[{"id":"c0c68309-6587-4e11-89d6-3b3537ac56da","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-33000.0}]},{"id":"39b1fdea-a484-474a-8d5f-3eacad872857","date":"2026-10-01","name":"Jajan","category_id":"9216ebdf-b020-47d9-a42a-f87a88063c19","created_at":"2026-10-01T08:00:00.006Z","lines":[{"id":"ed69e283-b195-493c-8f07-b05cdfabe915","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-20000.0}]},{"id":"93b9e800-a4bb-4bb6-acef-a3cb217b4179","date":"2026-10-02","name":"Makan siang","category_id":"3f70a65f-0378-48f1-a254-ed997945d175","created_at":"2026-10-02T08:00:00.007Z","lines":[{"id":"e98015f4-aaa2-48ca-8ec6-b41691ddb964","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-29000.0}]},{"id":"dc60eec0-bffb-4490-8cc0-b3e642e3e9b7","date":"2026-10-02","name":"Jajan","category_id":"9216ebdf-b020-47d9-a42a-f87a88063c19","created_at":"2026-10-02T08:00:00.008Z","lines":[{"id":"3f4d42bd-8daa-4aa4-912e-22a810cda555","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-7200.0}]},{"id":"ca2ded11-d822-4f4a-ae77-f26ad29613d3","date":"2026-10-02","name":"Laundry","category_id":"00d71566-66b4-4411-805a-01b9ccbb16c5","created_at":"2026-10-02T08:00:00.009Z","lines":[{"id":"17118bd9-6f9a-4fcc-8591-1e810dd09671","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-38650.0}]},{"id":"e2714ed0-150c-4653-92cd-7c246228faf3","date":"2026-10-02","name":"Gaji","category_id":"6d4fc065-b692-48da-bc47-bdd7b003e565","created_at":"2026-10-02T08:00:00.010Z","lines":[{"id":"514e3249-5c5f-4357-916f-3abb86f021ab","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":6660829.0}]},{"id":"78da2474-62a4-4981-b3cc-44641407acad","date":"2026-10-03","name":"Makan siang","category_id":"3f70a65f-0378-48f1-a254-ed997945d175","created_at":"2026-10-03T08:00:00.011Z","lines":[{"id":"d1c24ab0-3dc0-443c-83e8-9219528e4a3a","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-26000.0}]},{"id":"ef985610-d068-4dde-9b22-2fc517c27929","date":"2026-10-03","name":"Titipan makan siang","category_id":"ff6437ea-c1bf-4190-80ea-676b09228325","created_at":"2026-10-03T08:00:00.012Z","lines":[{"id":"fd5fd81e-f164-43d0-822a-f4d07e8ec380","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-38000.0}]},{"id":"d02e0d2f-ded5-4472-951a-48ec3df978d4","date":"2026-10-03","name":"Jajan","category_id":"9216ebdf-b020-47d9-a42a-f87a88063c19","created_at":"2026-10-03T08:00:00.013Z","lines":[{"id":"214bd0d7-f1c2-45a7-b857-38cc880e40ab","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-23400.0}]},{"id":"0d76bd25-0398-4768-b019-9b4b96d5258c","date":"2026-10-03","name":"Kopi","category_id":"9216ebdf-b020-47d9-a42a-f87a88063c19","created_at":"2026-10-03T08:00:00.014Z","lines":[{"id":"a163209e-6e48-4b1d-b070-9770ae7c00df","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-93500.0}]},{"id":"afe1f788-9b01-4112-a758-957cc9393b93","date":"2026-10-03","name":"Settled: Reimburse","category_id":"00d71566-66b4-4411-805a-01b9ccbb16c5","created_at":"2026-10-03T08:00:00.015Z","lines":[{"id":"7fbf2ca7-4464-4240-b32d-0fb34f7e59a2","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":33000.0},{"id":"3c9472fe-a742-41e8-a135-b06e571df6ff","pocket_id":"5a506b3f-db51-4fce-8225-eeb6abe9e1ba","amount":12000.0}]},{"id":"5dd6e745-33c0-4736-b766-80256cb92a1e","date":"2026-10-03","name":"Etoll","category_id":"d9514b8b-439e-4fee-a7aa-464c305a9332","created_at":"2026-10-03T08:00:00.016Z","lines":[{"id":"725f4da7-c2d0-4700-afd2-a3b660f6c7da","pocket_id":"7156f16e-ed5f-4ece-b413-ccd3e83018f7","amount":-100000.0}]},{"id":"99a26fe5-94a2-42bc-bb4e-b06cec7be72a","date":"2026-10-03","name":"Admin","category_id":"08647979-ccbf-4f5a-9f12-64a8dc30bf74","created_at":"2026-10-03T08:00:00.017Z","lines":[{"id":"be1c5486-08a9-45e5-9ae4-c7826501435d","pocket_id":"7156f16e-ed5f-4ece-b413-ccd3e83018f7","amount":-11631.0}]},{"id":"2a524e3a-5918-4373-bd4c-c8d27c7cb656","date":"2026-10-04","name":"Persembahan","category_id":"ff6437ea-c1bf-4190-80ea-676b09228325","created_at":"2026-10-04T08:00:00.018Z","lines":[{"id":"2bf48f26-bdc4-4612-88e2-940a5814f96c","pocket_id":"5a506b3f-db51-4fce-8225-eeb6abe9e1ba","amount":-12000.0}]},{"id":"dc5ced10-1ddb-42f9-a0fc-8f0c28cc07bc","date":"2026-10-04","name":"Makan malam","category_id":"9216ebdf-b020-47d9-a42a-f87a88063c19","created_at":"2026-10-04T08:00:00.019Z","lines":[{"id":"97876428-958b-4553-a033-a38d63f9fefd","pocket_id":"5a506b3f-db51-4fce-8225-eeb6abe9e1ba","amount":-33000.0}]},{"id":"89e88c57-7b41-456c-ae73-596f50790bc1","date":"2026-10-04","name":"Bola","category_id":"b7c4407d-f5b9-4d9b-be86-90305d2d8eb5","created_at":"2026-10-04T08:00:00.020Z","lines":[{"id":"57c4523d-c24f-4f3c-a27e-8ac5cb01a839","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-250000.0}]},{"id":"444eab92-165c-4d20-9c6e-22452823d32b","date":"2026-10-04","name":"Tennis","category_id":"b7c4407d-f5b9-4d9b-be86-90305d2d8eb5","created_at":"2026-10-04T08:00:00.021Z","lines":[{"id":"67746d43-c833-4520-a9f8-ab6019e0175d","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-60000.0}]},{"id":"cf4c9588-4ff5-44c5-8695-6f4fc3c456a9","date":"2026-10-04","name":"Jajan + Admin","category_id":"9216ebdf-b020-47d9-a42a-f87a88063c19","created_at":"2026-10-04T08:00:00.022Z","lines":[{"id":"3629a4be-ad0c-4eae-90b9-4d99d7f6a6fa","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-37829.33}]},{"id":"b072ed2b-cbe4-4973-a47e-41c5fc184848","date":"2026-10-04","name":"Wifi","category_id":"4261e44f-a059-4d83-b25f-0aa0faceb7a5","created_at":"2026-10-04T08:00:00.023Z","lines":[{"id":"5d44f7a7-8801-48f5-b70e-28437ecae05e","pocket_id":"11982441-c861-44fe-8b27-39cf702190f3","amount":-807423.0}]},{"id":"292946fe-3b93-4e8c-8fa7-e5ff9becc243","date":"2026-10-06","name":"Makan siang","category_id":"3f70a65f-0378-48f1-a254-ed997945d175","created_at":"2026-10-06T08:00:00.024Z","lines":[{"id":"2d9c15bd-c0ce-42e5-b5f2-6cf29cd02873","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-24000.0}]},{"id":"cc06608d-0b6d-4d8a-8ef5-8b29a8759aa9","date":"2026-10-06","name":"Nipple Cover","category_id":"9216ebdf-b020-47d9-a42a-f87a88063c19","created_at":"2026-10-06T08:00:00.025Z","lines":[{"id":"3b80fbbc-3464-4dfa-b089-c935180e053e","pocket_id":"ee89a9db-a62c-40a8-afe7-33fd9e2a6b43","amount":-46396.0}]},{"id":"bf743c4b-5989-424b-8777-d502ce322f54","date":"2026-10-06","name":"Carb + permen karet","category_id":"9216ebdf-b020-47d9-a42a-f87a88063c19","created_at":"2026-10-06T08:00:00.026Z","lines":[{"id":"983a65f7-0b33-41c4-833c-679f6928f256","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-17900.0}]},{"id":"86dcd623-5f49-4bd8-a23b-19c6f36e79fc","date":"2026-10-06","name":"Bensin","category_id":"ae290bdd-5d4b-42cc-9d64-e3dc7ad25756","created_at":"2026-10-06T08:00:00.027Z","lines":[{"id":"c5f3e245-d659-4296-aca8-a97117fba525","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-42777.0}]},{"id":"23019f95-36d5-444b-bda5-5250edba63a7","date":"2026-10-06","name":"Hotel","category_id":"8ffb09af-3feb-460f-851a-a62c57bff512","created_at":"2026-10-06T08:00:00.028Z","lines":[{"id":"e48e78a5-ffb3-4a86-905a-b5276ff32727","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-397514.0}]},{"id":"76de3ac0-66fc-4bb8-8886-d3644fd61235","date":"2026-10-06","name":"Norrm","category_id":"9216ebdf-b020-47d9-a42a-f87a88063c19","created_at":"2026-10-06T08:00:00.029Z","lines":[{"id":"93c6898a-e476-4ae5-96b9-7b21a0d267f4","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-100000.0}]},{"id":"454c0ef1-159f-45b6-92f7-b3be8c401a37","date":"2026-10-07","name":"Makan siang","category_id":"3f70a65f-0378-48f1-a254-ed997945d175","created_at":"2026-10-07T08:00:00.030Z","lines":[{"id":"4c749f5f-45dd-469c-91f4-013614b38425","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-29900.0}]},{"id":"3f027f5a-415f-4246-b75c-00622d30e3bf","date":"2026-10-07","name":"Jajan","category_id":"9216ebdf-b020-47d9-a42a-f87a88063c19","created_at":"2026-10-07T08:00:00.031Z","lines":[{"id":"edce348a-5577-4cfb-9545-265fecf4e94a","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-18500.0}]},{"id":"b04a2ad9-a509-4bfc-8f25-edc2ba044ef8","date":"2026-10-07","name":"Tennis","category_id":"b7c4407d-f5b9-4d9b-be86-90305d2d8eb5","created_at":"2026-10-07T08:00:00.032Z","lines":[{"id":"e170d151-4051-43c9-abbd-98fd891130e4","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-200500.0}]},{"id":"0bab27da-692a-4ac4-8134-f9dc5d2da33c","date":"2026-10-07","name":"Jajan","category_id":"9216ebdf-b020-47d9-a42a-f87a88063c19","created_at":"2026-10-07T08:00:00.033Z","lines":[{"id":"52a0f83a-8f60-4f8f-b7c6-12534fbe58e0","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-10000.0}]},{"id":"c4e4f90f-ab08-4cf0-b603-b1c27f519a16","date":"2026-10-07","name":"Potong","category_id":"9216ebdf-b020-47d9-a42a-f87a88063c19","created_at":"2026-10-07T08:00:00.034Z","lines":[{"id":"940b50bf-68db-4146-9887-c8ac7d0f3f33","pocket_id":"5a506b3f-db51-4fce-8225-eeb6abe9e1ba","amount":-90000.0}]},{"id":"dbceb0ff-9579-4053-a1e3-7dde95cbe9c8","date":"2026-10-07","name":"Regal","category_id":"00d71566-66b4-4411-805a-01b9ccbb16c5","created_at":"2026-10-07T08:00:00.035Z","lines":[{"id":"ff744c54-c284-4393-a32b-42ce71c0e052","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-30000.0}]},{"id":"bda126fe-a1fb-49a1-84c8-6f568333b375","date":"2026-10-07","name":"Titipan mama","category_id":"9216ebdf-b020-47d9-a42a-f87a88063c19","created_at":"2026-10-07T08:00:00.036Z","lines":[{"id":"d31cf2fd-e836-4cb7-bc15-db2599529319","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-8900.0}]},{"id":"df7005f6-7868-44bf-857f-0afa9c382d8e","date":"2026-10-08","name":"Sarapan","category_id":"3f70a65f-0378-48f1-a254-ed997945d175","created_at":"2026-10-08T08:00:00.037Z","lines":[{"id":"56b05833-ed47-426c-a555-1f7f0a68356f","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-13000.0}]},{"id":"be4c2a5c-b5c7-426b-9f7d-d91dabf28e83","date":"2026-10-08","name":"Makan siang","category_id":"3f70a65f-0378-48f1-a254-ed997945d175","created_at":"2026-10-08T08:00:00.038Z","lines":[{"id":"e0e999cf-cf8a-4f23-a560-2fd48240700b","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-26000.0}]},{"id":"3dc137e5-31d2-4f4f-9c91-e69e13382c87","date":"2026-10-09","name":"Galon","category_id":"1cd72f49-bbde-4453-9232-23e58d66d09e","created_at":"2026-10-09T08:00:00.039Z","lines":[{"id":"24d847f9-22a0-4f8d-be10-c5aad3fa987e","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-12000.0}]},{"id":"3780f057-eb84-441f-aee0-c5b9ba2cb9b8","date":"2026-10-09","name":"Air","category_id":"1cd72f49-bbde-4453-9232-23e58d66d09e","created_at":"2026-10-09T08:00:00.040Z","lines":[{"id":"553780a9-1843-4d25-8518-0844df41d94e","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-5900.0}]},{"id":"c4bb66a2-05c9-4af7-a5db-6735102266ca","date":"2026-10-09","name":"Laundry","category_id":"00d71566-66b4-4411-805a-01b9ccbb16c5","created_at":"2026-10-09T08:00:00.041Z","lines":[{"id":"23e3c2a7-7330-4917-bfeb-3e6d656af0d0","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-28600.0}]},{"id":"2026e0e5-aa8e-467d-b428-057555e48712","date":"2026-10-09","name":"Paket","category_id":"ff6437ea-c1bf-4190-80ea-676b09228325","created_at":"2026-10-09T08:00:00.042Z","lines":[{"id":"a3490648-881d-41e4-b56e-6200d1cbebd8","pocket_id":"5a506b3f-db51-4fce-8225-eeb6abe9e1ba","amount":-10000.0}]},{"id":"e04aa746-3ed8-4c30-9867-5155bba5402f","date":"2026-10-09","name":"Makan siang","category_id":"3f70a65f-0378-48f1-a254-ed997945d175","created_at":"2026-10-09T08:00:00.043Z","lines":[{"id":"069659f2-72da-497e-8893-293927671484","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-22000.0}]},{"id":"90e19e5e-828d-4f7f-975a-10168a0dc0f7","date":"2026-10-09","name":"Masker","category_id":"9216ebdf-b020-47d9-a42a-f87a88063c19","created_at":"2026-10-09T08:00:00.044Z","lines":[{"id":"41bc866a-0ffe-437a-a2d3-ac22ff4bedee","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-11900.0}]},{"id":"4a9f551e-1e8f-40c2-9d3d-4cd4fbb8c3fe","date":"2026-10-10","name":"Etoll","category_id":"d9514b8b-439e-4fee-a7aa-464c305a9332","created_at":"2026-10-10T08:00:00.045Z","lines":[{"id":"5e3df4bf-2961-4823-9663-ca2f28001149","pocket_id":"7156f16e-ed5f-4ece-b413-ccd3e83018f7","amount":-100000.0}]},{"id":"024af47e-e980-47f8-be91-bc1e2175d3eb","date":"2026-10-10","name":"Pesta Bolon","category_id":"ff6437ea-c1bf-4190-80ea-676b09228325","created_at":"2026-10-10T08:00:00.046Z","lines":[{"id":"47ab6524-296b-4c8c-a59e-0ec62b7d8361","pocket_id":"5a506b3f-db51-4fce-8225-eeb6abe9e1ba","amount":-400000.0}]},{"id":"c49facf3-85d1-4b96-8b56-2b5526fbd8b9","date":"2026-10-10","name":"Sarapan","category_id":"3f70a65f-0378-48f1-a254-ed997945d175","created_at":"2026-10-10T08:00:00.047Z","lines":[{"id":"dc66fbe8-3cfd-43f9-ad8c-a735cfda7de9","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-23000.0}]},{"id":"6f38a432-6480-43bc-8822-d1b3abf072da","date":"2026-10-10","name":"Cuci mobil","category_id":"d9514b8b-439e-4fee-a7aa-464c305a9332","created_at":"2026-10-10T08:00:00.048Z","lines":[{"id":"9ecfa8f0-d244-474b-875d-114ff03aa3af","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-50000.0},{"id":"7ffeda9e-82ff-4ac1-bb97-6a5fc7de5e87","pocket_id":"5a506b3f-db51-4fce-8225-eeb6abe9e1ba","amount":-10000.0}]},{"id":"a5bb7701-f41d-438a-b954-9ced2da97d33","date":"2026-10-10","name":"Kopi","category_id":"9216ebdf-b020-47d9-a42a-f87a88063c19","created_at":"2026-10-10T08:00:00.049Z","lines":[{"id":"bf73d961-77ed-4cec-89e9-417509409df8","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-17000.0}]},{"id":"7854c405-58ac-4b47-99f9-780543b0c569","date":"2026-10-10","name":"Makan siang","category_id":"3f70a65f-0378-48f1-a254-ed997945d175","created_at":"2026-10-10T08:00:00.050Z","lines":[{"id":"63e03884-5235-492b-a37a-1dc267a51b17","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-33200.0}]},{"id":"3cfb223c-8a96-468f-a60c-e588540f0a89","date":"2026-10-10","name":"Kopi","category_id":"9216ebdf-b020-47d9-a42a-f87a88063c19","created_at":"2026-10-10T08:00:00.051Z","lines":[{"id":"5aef62ee-481a-4ddb-90c2-c91c006da8d4","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-17000.0}]},{"id":"93a6a413-44ad-4dd6-ae1a-312e55e63a25","date":"2026-10-10","name":"Etoll","category_id":"d9514b8b-439e-4fee-a7aa-464c305a9332","created_at":"2026-10-10T08:00:00.052Z","lines":[{"id":"0c69c695-cdf1-41c9-95e8-11f062445419","pocket_id":"7156f16e-ed5f-4ece-b413-ccd3e83018f7","amount":-200000.0}]},{"id":"b59e4759-4c2a-4fca-b461-ef98579a2a8f","date":"2026-10-10","name":"Top up from Mandiri to ShopeePay","category_id":null,"created_at":"2026-10-10T08:00:00.053Z","lines":[{"id":"c06ce781-1a15-4c08-b520-a6cbcc0b0057","pocket_id":"7156f16e-ed5f-4ece-b413-ccd3e83018f7","amount":-101000},{"id":"b4216e54-6076-44b7-a2c5-8ac47f82e66c","pocket_id":"3958bcbd-d6ae-43a3-8307-ac935482122b","amount":100000}]},{"id":"997b0158-71d1-410b-9e92-411f66d787fa","date":"2026-10-10","name":"Makan malam","category_id":"9216ebdf-b020-47d9-a42a-f87a88063c19","created_at":"2026-10-10T08:00:00.054Z","lines":[{"id":"96e90a3d-c0d0-44ab-b249-06a43e8e2754","pocket_id":"3958bcbd-d6ae-43a3-8307-ac935482122b","amount":-54000}]},{"id":"694529ef-6b16-475f-93ca-f769c88f7ebd","date":"2026-10-10","name":"Top up from Cash to BCA","category_id":null,"created_at":"2026-10-10T08:00:00.055Z","lines":[{"id":"92fc7684-5ef3-42f4-9f15-cbd3236ec1f3","pocket_id":"5a506b3f-db51-4fce-8225-eeb6abe9e1ba","amount":-50000.0},{"id":"86838f18-55fc-41b6-bdc9-0f8ea31709cf","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":50000.0}]},{"id":"b83605b9-2a70-4a3d-81fd-0b96fb86c30f","date":"2026-10-10","name":"Bensin","category_id":"d9514b8b-439e-4fee-a7aa-464c305a9332","created_at":"2026-10-10T08:00:00.056Z","lines":[{"id":"68f72691-e22f-4a78-9f50-bae85a9587ad","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-150000.0},{"id":"ae75e67d-c1a8-4919-8147-41f79ba5bbae","pocket_id":"5a506b3f-db51-4fce-8225-eeb6abe9e1ba","amount":-7000.0}]},{"id":"39c0e09d-6e24-40d0-a42e-18335fe3579f","date":"2026-10-11","name":"Bensin","category_id":"d9514b8b-439e-4fee-a7aa-464c305a9332","created_at":"2026-10-11T08:00:00.057Z","lines":[{"id":"05c5d1e8-d929-43c8-8b0c-f594049740aa","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-548680.0}]},{"id":"131daed7-9416-49f6-8785-37ee4d9a272d","date":"2026-10-11","name":"Alfamart (exclude)","category_id":"8ffb09af-3feb-460f-851a-a62c57bff512","created_at":"2026-10-11T08:00:00.058Z","lines":[{"id":"2c4cbe49-81b4-40b2-abae-bab4375a1b8e","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-98000.0}]},{"id":"63e8470b-78d7-48fc-ae2c-2b592dbbd7dc","date":"2026-10-11","name":"Parma","category_id":"8ffb09af-3feb-460f-851a-a62c57bff512","created_at":"2026-10-11T08:00:00.059Z","lines":[{"id":"fd908469-1364-4adc-ade1-d1a0547f7420","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-134900.0}]},{"id":"edefb3b6-6016-459f-a379-2583988abce5","date":"2026-10-11","name":"Gia's Taman","category_id":"8ffb09af-3feb-460f-851a-a62c57bff512","created_at":"2026-10-11T08:00:00.060Z","lines":[{"id":"27c05a8e-0bd7-47b4-aad9-2b4c63525308","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-44000.0}]},{"id":"98fec902-acae-4b91-8002-b777b90075a7","date":"2026-10-11","name":"Gia's Coffee","category_id":"8ffb09af-3feb-460f-851a-a62c57bff512","created_at":"2026-10-11T08:00:00.061Z","lines":[{"id":"6f6a5926-dd85-4116-85e1-080b68cd2695","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-87100.0}]},{"id":"0378b567-a4c6-4787-b94d-b335d0e415f5","date":"2026-10-11","name":"Nasi Pedas","category_id":"8ffb09af-3feb-460f-851a-a62c57bff512","created_at":"2026-10-11T08:00:00.062Z","lines":[{"id":"79278ca3-cb6c-41a6-bfb6-4c8d028505d9","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-169900.0}]},{"id":"9dba4b78-54f8-47d6-acf4-dbe74047456e","date":"2026-10-11","name":"Alfamart (exclude)","category_id":"8ffb09af-3feb-460f-851a-a62c57bff512","created_at":"2026-10-11T08:00:00.063Z","lines":[{"id":"5540eaa8-c31c-4aae-b442-9c22c14ca499","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-21500.0}]},{"id":"669fc83b-0e7d-4c0d-8601-84116c06a0ea","date":"2026-10-11","name":"Sinar Warisan","category_id":"8ffb09af-3feb-460f-851a-a62c57bff512","created_at":"2026-10-11T08:00:00.064Z","lines":[{"id":"93ba07bc-75e6-4e1d-992f-c753cccd5f56","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-129800.0}]},{"id":"eaaf63be-5e3f-4688-aac9-df7a064f7b20","date":"2026-10-11","name":"Jajan Tennis","category_id":"b7c4407d-f5b9-4d9b-be86-90305d2d8eb5","created_at":"2026-10-11T08:00:00.065Z","lines":[{"id":"c114be08-518e-4fdc-b967-8f5f45ccb0e7","pocket_id":"5a506b3f-db51-4fce-8225-eeb6abe9e1ba","amount":-30000.0}]},{"id":"cb948413-8734-4c87-b9fb-de4dac56a26b","date":"2026-10-12","name":"Etoll","category_id":"d9514b8b-439e-4fee-a7aa-464c305a9332","created_at":"2026-10-12T08:00:00.066Z","lines":[{"id":"64fb2f94-9853-48d5-9e3c-9c4fa5121ecb","pocket_id":"7156f16e-ed5f-4ece-b413-ccd3e83018f7","amount":-50000.0}]},{"id":"639cbd6e-db81-4ec2-9217-5060038f1869","date":"2026-10-12","name":"Bolon","category_id":"e7434d3e-c699-4540-816a-46c007a1f32d","created_at":"2026-10-12T08:00:00.067Z","lines":[{"id":"465c1cff-f57d-4d4f-b5e5-e8aaa0117f13","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":200000.0}]},{"id":"9bc12250-bc64-4e9a-b915-40615cd08111","date":"2026-10-12","name":"Blue Doors","category_id":"8ffb09af-3feb-460f-851a-a62c57bff512","created_at":"2026-10-12T08:00:00.068Z","lines":[{"id":"f371db90-b0ef-443a-a02c-783c519de82d","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-95000.0}]},{"id":"1971cd70-1365-4b29-8be8-546a1bd22677","date":"2026-10-12","name":"Mimadre","category_id":"8ffb09af-3feb-460f-851a-a62c57bff512","created_at":"2026-10-12T08:00:00.069Z","lines":[{"id":"2250f8ae-29a8-42d4-bbcb-f9cad4805756","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-326600.0}]},{"id":"37562981-2b56-491b-a151-2302a4fe492f","date":"2026-10-12","name":"Parkir","category_id":"d9514b8b-439e-4fee-a7aa-464c305a9332","created_at":"2026-10-12T08:00:00.070Z","lines":[{"id":"76768814-f690-42d0-8de6-9433311c0bb5","pocket_id":"5a506b3f-db51-4fce-8225-eeb6abe9e1ba","amount":-20000.0}]},{"id":"9d7e46c9-6ffe-4499-9fb9-7c22a1949fc9","date":"2026-10-12","name":"Settled: Reimburse","category_id":"00d71566-66b4-4411-805a-01b9ccbb16c5","created_at":"2026-10-12T08:00:00.071Z","lines":[{"id":"f67190c7-75c2-4983-94ef-17bc8e439dfe","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":772171.0}]},{"id":"6bf49c1a-5b25-4366-a10b-cfd5554657dc","date":"2026-10-13","name":"Obat","category_id":"5f5e4b19-a069-4983-9927-be131cb979d3","created_at":"2026-10-13T08:00:00.072Z","lines":[{"id":"16641c47-bf1b-49f9-aeb3-71956f7a8c43","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-37500.0}]},{"id":"e953c581-6f47-4936-8423-89c2695cd9d7","date":"2026-10-13","name":"Makan siang","category_id":"3f70a65f-0378-48f1-a254-ed997945d175","created_at":"2026-10-13T08:00:00.073Z","lines":[{"id":"260d62f1-c2d1-4b4c-b566-cf72367dd3cb","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-30000.0}]},{"id":"1dc94d0a-8bbe-40f3-9276-4b7681de33b5","date":"2026-10-14","name":"Makan siang","category_id":"3f70a65f-0378-48f1-a254-ed997945d175","created_at":"2026-10-14T08:00:00.074Z","lines":[{"id":"e9025585-963b-439e-98a3-1dc9c1fa387c","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-27000.0}]},{"id":"8d95f8f3-59e7-49fa-a18c-4a1e6a3acaa7","date":"2026-10-14","name":"Jajan + hand sanitizer","category_id":"9216ebdf-b020-47d9-a42a-f87a88063c19","created_at":"2026-10-14T08:00:00.075Z","lines":[{"id":"20c77312-8fa4-40db-ac34-22b396e433cf","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-26700.0}]},{"id":"216682e7-310d-44bd-ad53-1313bd058835","date":"2026-10-14","name":"Solaria + Holland + Minum","category_id":"8ffb09af-3feb-460f-851a-a62c57bff512","created_at":"2026-10-14T08:00:00.076Z","lines":[{"id":"c31bb50d-90a3-4466-acdd-34b09f0af1b1","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-156500.0},{"id":"60ed93d2-c1c3-404d-ab64-cb830343a06b","pocket_id":"5a506b3f-db51-4fce-8225-eeb6abe9e1ba","amount":-10000.0}]},{"id":"85d4eb2d-c67a-4595-af5a-b396c2a9b6d4","date":"2026-10-15","name":"Makan siang + jajan","category_id":"3f70a65f-0378-48f1-a254-ed997945d175","created_at":"2026-10-15T08:00:00.077Z","lines":[{"id":"b38ad26e-5325-44c5-9afe-e408bc7960d3","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-35000.0}]},{"id":"fa3ac48d-ad01-4f80-8965-148a30a693f6","date":"2026-10-15","name":"Top up from Cash to BCA","category_id":null,"created_at":"2026-10-15T08:00:00.078Z","lines":[{"id":"5d79ba1e-c859-4ab8-9183-5339da6310b2","pocket_id":"5a506b3f-db51-4fce-8225-eeb6abe9e1ba","amount":-40000.0},{"id":"66e61ef7-4092-4389-aeaa-dbfa9ae78bce","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":40000.0}]},{"id":"c321e84e-3e4f-43c0-a17f-2cc2cb4c4f5d","date":"2026-10-16","name":"Obat","category_id":"5f5e4b19-a069-4983-9927-be131cb979d3","created_at":"2026-10-16T08:00:00.079Z","lines":[{"id":"f6aa91ac-f183-412c-a935-bde68676a1ff","pocket_id":"ee89a9db-a62c-40a8-afe7-33fd9e2a6b43","amount":-43550.0}]},{"id":"c8d6c071-4e66-4867-bd6b-77139b586557","date":"2026-10-16","name":"Makan siang","category_id":"3f70a65f-0378-48f1-a254-ed997945d175","created_at":"2026-10-16T08:00:00.080Z","lines":[{"id":"d6367276-64a7-43a9-951f-e7ee78a1d7ed","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-26000.0}]},{"id":"d3183101-e767-46ac-8a2a-0f63ba57cdf9","date":"2026-10-16","name":"Jajan","category_id":"9216ebdf-b020-47d9-a42a-f87a88063c19","created_at":"2026-10-16T08:00:00.081Z","lines":[{"id":"853bc045-4bc3-4191-b875-86632b8f7663","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-14400.0}]},{"id":"dbc06d37-ee2e-48d7-b2c5-b1cd948f467b","date":"2026-10-16","name":"Settled: Reimburse","category_id":"00d71566-66b4-4411-805a-01b9ccbb16c5","created_at":"2026-10-16T08:00:00.082Z","lines":[{"id":"d1e454c1-e631-4696-b4a3-fb0d01982e9b","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":14000.0}]},{"id":"334b55ae-6b2b-40c0-bdda-9bacfcf56e71","date":"2026-10-16","name":"Pinjem Akbar","category_id":"00d71566-66b4-4411-805a-01b9ccbb16c5","created_at":"2026-10-16T08:00:00.083Z","lines":[{"id":"9e822723-7fcc-4bde-a455-d953fb7e9657","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-1000000.0}]},{"id":"e2b4ed73-c686-43be-8566-95d079b2d2bf","date":"2026-10-17","name":"Makan","category_id":"9216ebdf-b020-47d9-a42a-f87a88063c19","created_at":"2026-10-17T08:00:00.084Z","lines":[{"id":"892dfaa5-b3ec-4a72-bdfe-2e435c2c0aea","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-13000.0}]},{"id":"1fa3d3ac-e6fb-4a03-bc41-c17e56541299","date":"2026-10-17","name":"Galon","category_id":"1cd72f49-bbde-4453-9232-23e58d66d09e","created_at":"2026-10-17T08:00:00.085Z","lines":[{"id":"728114cf-a963-4b67-aa3e-ddd2eab254e6","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-6000.0}]},{"id":"cdba1797-0565-4f41-9bb2-595493a54d06","date":"2026-10-18","name":"Liq","category_id":"9216ebdf-b020-47d9-a42a-f87a88063c19","created_at":"2026-10-18T08:00:00.086Z","lines":[{"id":"163df0c2-6b24-4207-834e-347b4f03550e","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-150000.0}]},{"id":"50eea45b-9421-498c-a2d9-ae90e40d620e","date":"2026-10-18","name":"Telor","category_id":"00d71566-66b4-4411-805a-01b9ccbb16c5","created_at":"2026-10-18T08:00:00.087Z","lines":[{"id":"b8473508-76d8-440c-90a6-e013a668b614","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-50000.0}]},{"id":"cbab24dd-04b7-4f80-94c8-ec0f7957395b","date":"2026-10-18","name":"Motor","category_id":"d9514b8b-439e-4fee-a7aa-464c305a9332","created_at":"2026-10-18T08:00:00.088Z","lines":[{"id":"bdc01c2f-f81b-490c-b0fd-a24f192805b6","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-114240.0},{"id":"6032bdf5-5f91-44f0-bb8d-f10b2e57963d","pocket_id":"7156f16e-ed5f-4ece-b413-ccd3e83018f7","amount":-21500.0}]},{"id":"35ac0372-1dcf-46ec-858a-ce4d9a48bd66","date":"2026-10-18","name":"Makan","category_id":"8ffb09af-3feb-460f-851a-a62c57bff512","created_at":"2026-10-18T08:00:00.089Z","lines":[{"id":"5bb60270-d404-4470-9520-e619230b5e2a","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-257600.0}]},{"id":"cc2a2f2a-f1a0-4165-bb6f-f92ec6441de6","date":"2026-10-19","name":"Sarapan + makan siang","category_id":"00d71566-66b4-4411-805a-01b9ccbb16c5","created_at":"2026-10-19T08:00:00.090Z","lines":[{"id":"ad294917-9578-4afc-aa3b-f613832009be","pocket_id":"3958bcbd-d6ae-43a3-8307-ac935482122b","amount":-42000.0}]},{"id":"c15ddc9e-fb1b-43a1-a8b5-0acb1f7c1784","date":"2026-10-19","name":"Kos","category_id":"de5ad481-8a33-4293-b66f-189690d5e6b5","created_at":"2026-10-19T08:00:00.091Z","lines":[{"id":"354d0736-0c24-4316-b75d-15f03b2be15d","pocket_id":"11982441-c861-44fe-8b27-39cf702190f3","amount":1000000.0}]},{"id":"a0d79fac-3596-4489-9bea-1302fa5de325","date":"2026-10-19","name":"Top up from Mandiri to ShopeePay","category_id":null,"created_at":"2026-10-19T08:00:00.092Z","lines":[{"id":"bb6f394e-bac8-4600-b99e-687382e66aee","pocket_id":"7156f16e-ed5f-4ece-b413-ccd3e83018f7","amount":-201000},{"id":"cf269cf4-68f7-451f-bb44-4101cedb2988","pocket_id":"3958bcbd-d6ae-43a3-8307-ac935482122b","amount":200000}]},{"id":"5764d72b-8de7-4507-9071-80ba721a5073","date":"2026-10-19","name":"Parfum","category_id":"9216ebdf-b020-47d9-a42a-f87a88063c19","created_at":"2026-10-19T08:00:00.093Z","lines":[{"id":"ddbc6ce3-1653-4593-96d3-7355d82c3c58","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-308750.0}]},{"id":"e04984db-ef24-450d-b01a-3b2ba2159f67","date":"2026-10-20","name":"Makan siang","category_id":"3f70a65f-0378-48f1-a254-ed997945d175","created_at":"2026-10-20T08:00:00.094Z","lines":[{"id":"4fda273a-d6fa-4dd1-a706-180e1ba7dc24","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-31000.0}]},{"id":"e0c6abda-c171-4250-ba8e-c00c83da6d64","date":"2026-10-20","name":"Jajan","category_id":"9216ebdf-b020-47d9-a42a-f87a88063c19","created_at":"2026-10-20T08:00:00.095Z","lines":[{"id":"44b0afd6-a4cb-4b94-8dc3-01710a22dc47","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-25000.0}]},{"id":"2af99b4e-d126-430f-9b41-01801cfea193","date":"2026-10-20","name":"Top up from Mandiri to Cash","category_id":null,"created_at":"2026-10-20T08:00:00.096Z","lines":[{"id":"1c381843-f2eb-43ea-9f79-1a5ecaa647a5","pocket_id":"7156f16e-ed5f-4ece-b413-ccd3e83018f7","amount":-300000},{"id":"2579ba8b-4964-41f5-a522-92c42c2e7221","pocket_id":"5a506b3f-db51-4fce-8225-eeb6abe9e1ba","amount":300000}]},{"id":"b5aa0773-8c2c-4cd0-a71a-7eefb54d578c","date":"2026-10-20","name":"Kopi","category_id":"9216ebdf-b020-47d9-a42a-f87a88063c19","created_at":"2026-10-20T08:00:00.097Z","lines":[{"id":"72dd36bb-9d79-4741-bb51-7481e2633461","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-17000.0}]},{"id":"4ce7ece6-9054-430e-99f3-3ad6aa020ab2","date":"2026-10-21","name":"Jajan","category_id":"9216ebdf-b020-47d9-a42a-f87a88063c19","created_at":"2026-10-21T08:00:00.098Z","lines":[{"id":"1e0abdf1-600d-402f-abf2-a22814b046a0","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-19600.0}]},{"id":"0a260ab9-f1ef-4c4f-b168-1ad879659a75","date":"2026-10-21","name":"Rombak celana","category_id":"9216ebdf-b020-47d9-a42a-f87a88063c19","created_at":"2026-10-21T08:00:00.099Z","lines":[{"id":"02007e18-0ceb-4f42-8ae3-609e6fa52899","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-34000.0},{"id":"67df0d8f-9f22-458d-9c97-fa3fdff7db4a","pocket_id":"5a506b3f-db51-4fce-8225-eeb6abe9e1ba","amount":-59000.0}]},{"id":"7fcfd534-7a82-439a-bd13-e9822d9b19c4","date":"2026-10-21","name":"Makan malam","category_id":"00d71566-66b4-4411-805a-01b9ccbb16c5","created_at":"2026-10-21T08:00:00.100Z","lines":[{"id":"3f022f3f-d98c-4e8b-9632-cef84b2845f1","pocket_id":"3958bcbd-d6ae-43a3-8307-ac935482122b","amount":-27000}]},{"id":"50f6a6ee-ef72-4560-b1aa-c5f12d13fe66","date":"2026-10-21","name":"Makan malam","category_id":"e7434d3e-c699-4540-816a-46c007a1f32d","created_at":"2026-10-21T08:00:00.101Z","lines":[{"id":"bc6753a2-f012-4583-8101-482084b27af7","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":6000}]},{"id":"e1b16236-cde8-4944-9de1-7769f2cf4a3d","date":"2026-10-22","name":"Makan siang","category_id":"00d71566-66b4-4411-805a-01b9ccbb16c5","created_at":"2026-10-22T08:00:00.102Z","lines":[{"id":"a713b159-08b5-4532-81f8-18269258ad3e","pocket_id":"3958bcbd-d6ae-43a3-8307-ac935482122b","amount":-35000.0}]},{"id":"c59200d3-a07d-4586-8a01-8b09bf1d05b9","date":"2026-10-22","name":"Makan siang","category_id":"9216ebdf-b020-47d9-a42a-f87a88063c19","created_at":"2026-10-22T08:00:00.103Z","lines":[{"id":"79ddbee9-1a37-42ca-8282-5ead8d49fa38","pocket_id":"3958bcbd-d6ae-43a3-8307-ac935482122b","amount":-10159.0}]},{"id":"71e23706-8c63-4baf-a97a-a92c7db992ab","date":"2026-10-22","name":"Tennis","category_id":"b7c4407d-f5b9-4d9b-be86-90305d2d8eb5","created_at":"2026-10-22T08:00:00.104Z","lines":[{"id":"5989c705-ce20-4557-a92f-dc07e4e6d89a","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-152500.0},{"id":"78ceb6d7-fc73-48a7-81e5-2174fc648cdd","pocket_id":"5a506b3f-db51-4fce-8225-eeb6abe9e1ba","amount":-17000.0}]},{"id":"ca6c0236-6e90-4884-9f82-968f542f1ecf","date":"2026-10-22","name":"Makan malam","category_id":"9216ebdf-b020-47d9-a42a-f87a88063c19","created_at":"2026-10-22T08:00:00.105Z","lines":[{"id":"0bbb38b3-40c5-4a78-a17a-8b8837c135a0","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-34000.0}]},{"id":"bae774d1-7823-47db-8e01-8b6cb0daa902","date":"2026-10-23","name":"Jajan","category_id":"9216ebdf-b020-47d9-a42a-f87a88063c19","created_at":"2026-10-23T08:00:00.106Z","lines":[{"id":"44b968c6-6f76-4523-afde-c5f5a7ec379c","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-33800.0},{"id":"0df6c73e-47a5-4174-b20f-5fb4edf8644c","pocket_id":"5a506b3f-db51-4fce-8225-eeb6abe9e1ba","amount":-7000.0}]},{"id":"b54f1792-25ae-47c1-80e2-d289ff033be3","date":"2026-10-23","name":"Tennis & Makan","category_id":"8ffb09af-3feb-460f-851a-a62c57bff512","created_at":"2026-10-23T08:00:00.107Z","lines":[{"id":"e1357813-c4b1-4817-990f-81e1d71a9430","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-272998.0},{"id":"6b055046-6bdb-49eb-acaa-7d0e8770413d","pocket_id":"5a506b3f-db51-4fce-8225-eeb6abe9e1ba","amount":-9000.0}]},{"id":"4872cc30-b9c1-4721-9e2b-71ca4ad39c6e","date":"2026-10-23","name":"Bensin","category_id":"d9514b8b-439e-4fee-a7aa-464c305a9332","created_at":"2026-10-23T08:00:00.108Z","lines":[{"id":"d97f8a81-7aca-4df5-884a-b79f010389da","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-300000.0}]},{"id":"c571a877-4023-4470-9c24-89f8a8caa77d","date":"2026-10-24","name":"Jajan","category_id":"9216ebdf-b020-47d9-a42a-f87a88063c19","created_at":"2026-10-24T08:00:00.109Z","lines":[{"id":"619ddd27-a2da-49e9-9936-0cccae413795","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-10900.0}]},{"id":"f65954e2-8c84-48f1-a8e9-1a45566062c7","date":"2026-10-24","name":"Top up from Mandiri to Gopay","category_id":null,"created_at":"2026-10-24T08:00:00.110Z","lines":[{"id":"812eec7b-7c45-4149-a979-569d1118b766","pocket_id":"7156f16e-ed5f-4ece-b413-ccd3e83018f7","amount":-201200},{"id":"883b04a7-803f-4a87-b290-0ecb27a1e12e","pocket_id":"ee89a9db-a62c-40a8-afe7-33fd9e2a6b43","amount":200000}]},{"id":"fa6f5a70-7df6-4500-a491-b804a5804524","date":"2026-10-24","name":"Gopay","category_id":"ff6437ea-c1bf-4190-80ea-676b09228325","created_at":"2026-10-24T08:00:00.111Z","lines":[{"id":"0e784f07-d849-46e3-89fd-c95da7b1db7d","pocket_id":"ee89a9db-a62c-40a8-afe7-33fd9e2a6b43","amount":-60500}]},{"id":"50b32d4e-47a3-4cfe-88d4-8b9cfb5e2f37","date":"2026-10-24","name":"Etoll","category_id":"d9514b8b-439e-4fee-a7aa-464c305a9332","created_at":"2026-10-24T08:00:00.112Z","lines":[{"id":"8dece016-6750-4f88-a9fd-bc1134d00c18","pocket_id":"7156f16e-ed5f-4ece-b413-ccd3e83018f7","amount":-100000.0}]},{"id":"515d152b-5881-4fa1-bd60-12b64c470518","date":"2026-10-24","name":"iCloud","category_id":"ff6437ea-c1bf-4190-80ea-676b09228325","created_at":"2026-10-24T08:00:00.113Z","lines":[{"id":"a271454e-4336-45dd-b018-094426a87087","pocket_id":"ee89a9db-a62c-40a8-afe7-33fd9e2a6b43","amount":-15000.0}]},{"id":"cafa6588-b9fb-4535-a741-8b76ccca540c","date":"2026-10-24","name":"Settlement","category_id":"ff6437ea-c1bf-4190-80ea-676b09228325","created_at":"2026-10-24T08:00:00.114Z","lines":[{"id":"385eb72d-58ae-4c6d-8607-ac2a0b8e4c3a","pocket_id":"5a506b3f-db51-4fce-8225-eeb6abe9e1ba","amount":-50000.0}]},{"id":"5308bb72-c9d0-48d5-886c-c07394ba8a66","date":"2026-10-24","name":"Makan malam","category_id":"00d71566-66b4-4411-805a-01b9ccbb16c5","created_at":"2026-10-24T08:00:00.115Z","lines":[{"id":"c56a3d96-54c9-4f67-9825-0209175af59a","pocket_id":"3958bcbd-d6ae-43a3-8307-ac935482122b","amount":-33850.0}]},{"id":"cb5d8998-ea0d-4913-beaa-954e1c7847f6","date":"2026-10-25","name":"Makan siang","category_id":"9216ebdf-b020-47d9-a42a-f87a88063c19","created_at":"2026-10-25T08:00:00.116Z","lines":[{"id":"71374bb0-6f67-4586-bf43-07d06d75ba93","pocket_id":"5a506b3f-db51-4fce-8225-eeb6abe9e1ba","amount":-8000.0},{"id":"de296594-2a0c-4348-95da-30cd4266bfc7","pocket_id":"3958bcbd-d6ae-43a3-8307-ac935482122b","amount":-40839.0}]},{"id":"957a04a5-88bf-4caf-acdc-9a34a357648d","date":"2026-10-25","name":"Makan malam","category_id":"00d71566-66b4-4411-805a-01b9ccbb16c5","created_at":"2026-10-25T08:00:00.117Z","lines":[{"id":"60c60322-f797-42d1-b984-1e75f9bdb73c","pocket_id":"ee89a9db-a62c-40a8-afe7-33fd9e2a6b43","amount":-50000.0}]},{"id":"747bd98a-4544-4137-b88f-4064c4f59853","date":"2026-10-25","name":"Makan malam","category_id":"9216ebdf-b020-47d9-a42a-f87a88063c19","created_at":"2026-10-25T08:00:00.118Z","lines":[{"id":"50df5950-c295-464d-b482-c5026f2a03a0","pocket_id":"ee89a9db-a62c-40a8-afe7-33fd9e2a6b43","amount":-630.0}]},{"id":"579e894d-6d69-4c6f-a7d9-a14c761e5278","date":"2026-10-25","name":"Tennis","category_id":"b7c4407d-f5b9-4d9b-be86-90305d2d8eb5","created_at":"2026-10-25T08:00:00.119Z","lines":[{"id":"313b9ecf-8074-4d0e-9aa7-68bdde661b57","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-117000.0}]},{"id":"e94aaea4-15a9-41e9-b9fb-2611e4fb19d1","date":"2026-10-26","name":"Makan siang","category_id":"9216ebdf-b020-47d9-a42a-f87a88063c19","created_at":"2026-10-26T08:00:00.120Z","lines":[{"id":"96e06fa2-56db-4891-9269-c87cedfaeec9","pocket_id":"3958bcbd-d6ae-43a3-8307-ac935482122b","amount":-35000.0}]},{"id":"3c371aca-36a7-4819-88bb-71d595b15223","date":"2026-10-26","name":"Telor","category_id":"00d71566-66b4-4411-805a-01b9ccbb16c5","created_at":"2026-10-26T08:00:00.121Z","lines":[{"id":"9ee3a4b0-0373-44b0-8ce6-d2f2572e9731","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-46000.0}]},{"id":"8abcd824-ea0c-4ac5-9c1b-e25f10fc56e1","date":"2026-10-26","name":"Indomie + shampoo","category_id":"00d71566-66b4-4411-805a-01b9ccbb16c5","created_at":"2026-10-26T08:00:00.122Z","lines":[{"id":"21926646-577f-4b51-921c-1ba76d9edd91","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-77700.0}]},{"id":"a90a13ec-bcfa-4764-bedd-20ac25d2fed1","date":"2026-10-27","name":"Spotify","category_id":"72cf0342-5b13-4e55-8e8c-d866f8a4d0e6","created_at":"2026-10-27T08:00:00.123Z","lines":[{"id":"2b581e28-051e-4d5f-bd73-0523874a6a13","pocket_id":"7156f16e-ed5f-4ece-b413-ccd3e83018f7","amount":-79900.0}]},{"id":"f32ec346-adab-4920-8fe1-86f25e6837d2","date":"2026-10-27","name":"Bensin tol","category_id":"00d71566-66b4-4411-805a-01b9ccbb16c5","created_at":"2026-10-27T08:00:00.124Z","lines":[{"id":"ad8b05aa-a470-45ff-93d9-2d2d034adcea","pocket_id":"7156f16e-ed5f-4ece-b413-ccd3e83018f7","amount":-100000.0}]},{"id":"0bab8241-6b0a-4a43-850b-a1e00093bc0a","date":"2026-10-27","name":"Top up from Mandiri to ShopeePay","category_id":null,"created_at":"2026-10-27T08:00:00.125Z","lines":[{"id":"1e069e68-736c-4428-8861-d6b491d93cb2","pocket_id":"7156f16e-ed5f-4ece-b413-ccd3e83018f7","amount":-200000},{"id":"dabf4b88-de94-415b-a651-ffe4f4480083","pocket_id":"3958bcbd-d6ae-43a3-8307-ac935482122b","amount":200000}]},{"id":"2f8c9202-e1ff-42e1-b6c7-fe1d3c054da4","date":"2026-10-27","name":"Bedak mama","category_id":"00d71566-66b4-4411-805a-01b9ccbb16c5","created_at":"2026-10-27T08:00:00.126Z","lines":[{"id":"9d7c97fd-17ff-4647-8177-11dbb11e35be","pocket_id":"3958bcbd-d6ae-43a3-8307-ac935482122b","amount":-169400},{"id":"3c46e78e-c21d-4a42-ad39-e8844db15ad0","pocket_id":"7156f16e-ed5f-4ece-b413-ccd3e83018f7","amount":-1000}]},{"id":"e2512de5-0d54-41fe-a8ef-7af66be6361e","date":"2026-10-27","name":"Top up from BCA to Cash","category_id":null,"created_at":"2026-10-27T08:00:00.127Z","lines":[{"id":"4885c85c-e6df-4b72-b102-f90a5a162c82","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-200000},{"id":"edf83372-34af-42cc-84fb-1abe6f9aef10","pocket_id":"5a506b3f-db51-4fce-8225-eeb6abe9e1ba","amount":200000}]},{"id":"329ce673-66b8-4970-8aaf-e634584d2798","date":"2026-10-27","name":"Jajan","category_id":"9216ebdf-b020-47d9-a42a-f87a88063c19","created_at":"2026-10-27T08:00:00.128Z","lines":[{"id":"b839f955-18e5-40c0-86ee-a7a36f155fff","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-21900}]},{"id":"8f2e1eb9-971a-42b2-ab33-492e06e1de22","date":"2026-10-27","name":"Parkir + Charger","category_id":"d9514b8b-439e-4fee-a7aa-464c305a9332","created_at":"2026-10-27T08:00:00.129Z","lines":[{"id":"a6729a0f-b7df-4997-bb5e-1e4b5ebf581e","pocket_id":"5a506b3f-db51-4fce-8225-eeb6abe9e1ba","amount":-35000.0}]},{"id":"6b50663e-4d38-4f3f-bd7e-d8f7fee6974e","date":"2026-10-27","name":"Lampu","category_id":"00d71566-66b4-4411-805a-01b9ccbb16c5","created_at":"2026-10-27T08:00:00.130Z","lines":[{"id":"e4fecb9a-bc93-47f9-84cc-46bb1b70491c","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-990000.0}]},{"id":"0aa745b4-aba7-4d4c-9eec-66ae26caf4ed","date":"2026-10-27","name":"Restring","category_id":"b7c4407d-f5b9-4d9b-be86-90305d2d8eb5","created_at":"2026-10-27T08:00:00.131Z","lines":[{"id":"2e5ae7bb-b914-4b2f-96bb-3a0f46eb45ea","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-339000.0}]},{"id":"dadf6aa1-f4d5-4e47-8a00-e584b35fc773","date":"2026-10-27","name":"Sendal","category_id":"9216ebdf-b020-47d9-a42a-f87a88063c19","created_at":"2026-10-27T08:00:00.132Z","lines":[{"id":"534c4515-807e-4ad6-95e1-be1bc1b7a11f","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-479900.0}]},{"id":"db333518-3785-4643-9284-e74e9306092d","date":"2026-10-27","name":"Wingstop","category_id":"9216ebdf-b020-47d9-a42a-f87a88063c19","created_at":"2026-10-27T08:00:00.133Z","lines":[{"id":"9a145f49-301e-4770-bb47-865e694cacf0","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-106000.0}]},{"id":"ce1b6e0f-9888-408b-985f-1813bf6d5db9","date":"2026-10-27","name":"Tennis","category_id":"b7c4407d-f5b9-4d9b-be86-90305d2d8eb5","created_at":"2026-10-27T08:00:00.134Z","lines":[{"id":"2c8f85d3-62e3-4e87-b90c-8bb93e0d1e99","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-152500.0}]},{"id":"9c7c5448-9bbe-4ae2-95f2-3f8d029ccee4","date":"2026-10-27","name":"Kopi","category_id":"9216ebdf-b020-47d9-a42a-f87a88063c19","created_at":"2026-10-27T08:00:00.135Z","lines":[{"id":"342b6ce8-058f-4876-bda8-e09d6b24a12a","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-20000.0}]},{"id":"2e06eb4d-d555-4324-9b1a-77860d51f758","date":"2026-10-27","name":"Top up from Mandiri to Gopay","category_id":null,"created_at":"2026-10-27T08:00:00.136Z","lines":[{"id":"a66338d2-c155-49e8-8253-96bcd8c717f3","pocket_id":"7156f16e-ed5f-4ece-b413-ccd3e83018f7","amount":-301200},{"id":"b63d5246-d09b-472d-a23d-780ed2e327ae","pocket_id":"ee89a9db-a62c-40a8-afe7-33fd9e2a6b43","amount":300000}]},{"id":"8f62dbdb-fe77-4c82-b997-a1168fc7c2f4","date":"2026-10-27","name":"Claude","category_id":"00de6c0d-258c-4bad-8f85-8cf24b373be7","created_at":"2026-10-27T08:00:00.137Z","lines":[{"id":"defef56e-64ea-4ae3-b91e-5e4ecfd94b39","pocket_id":"ee89a9db-a62c-40a8-afe7-33fd9e2a6b43","amount":-349000}]},{"id":"958ea75a-ad11-461a-bca6-e847f72aff63","date":"2026-10-28","name":"Liquid","category_id":"9216ebdf-b020-47d9-a42a-f87a88063c19","created_at":"2026-10-28T08:00:00.138Z","lines":[{"id":"7866d58c-acf0-4775-ba1e-2d8bfd3b0e6a","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-150000.0}]},{"id":"ca973984-5afb-41c1-b964-df2f9ff4c78a","date":"2026-10-28","name":"Jajan","category_id":"9216ebdf-b020-47d9-a42a-f87a88063c19","created_at":"2026-10-28T08:00:00.139Z","lines":[{"id":"ce0bd5cf-88ec-48cf-a36b-5613ad1c56fa","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-46000.0}]},{"id":"d18cab85-e8ba-4328-9349-acea241f3167","date":"2026-10-28","name":"Jajan","category_id":"9216ebdf-b020-47d9-a42a-f87a88063c19","created_at":"2026-10-28T08:00:00.140Z","lines":[{"id":"9ddf6b74-1800-42e8-a793-4fb2d9b1b7a0","pocket_id":"95c21ef2-34a1-4a8c-a362-b2e4878e9b70","amount":-37100.0}]}],"debts":[{"id":"3a0f7ec9-5264-45cf-abe2-659e08a3e4fc","kind":"AR","date":"2026-10-01","name":"Makan siang mama","amount":32786.0,"settled_at":null,"open_tx_id":"001ec81d-1414-4549-a45a-e96bf6c5927b","settle_tx_id":null,"created_at":"2026-10-01T00:00:00Z"},{"id":"b987ba3d-a25d-469c-84b2-1e877f944d38","kind":"AR","date":"2026-10-02","name":"Laundry","amount":38650.0,"settled_at":null,"open_tx_id":"ca2ded11-d822-4f4a-ae77-f26ad29613d3","settle_tx_id":null,"created_at":"2026-10-02T00:00:00Z"},{"id":"456a1e61-ef99-40ca-a664-7c59376b881d","kind":"AR","date":"2026-10-03","name":"Reimburse","amount":45000.0,"settled_at":"2026-10-03","open_tx_id":null,"settle_tx_id":"afe1f788-9b01-4112-a758-957cc9393b93","created_at":"2026-10-03T00:00:00Z"},{"id":"4ef7cdfb-65f5-427f-a990-6495f804cbf0","kind":"AR","date":"2026-10-07","name":"Regal","amount":30000.0,"settled_at":null,"open_tx_id":"dbceb0ff-9579-4053-a1e3-7dde95cbe9c8","settle_tx_id":null,"created_at":"2026-10-07T00:00:00Z"},{"id":"e58867b0-e67f-4b42-baf2-14b7432bd8c8","kind":"AR","date":"2026-10-09","name":"Laundry","amount":28600.0,"settled_at":null,"open_tx_id":"c4bb66a2-05c9-4af7-a5db-6735102266ca","settle_tx_id":null,"created_at":"2026-10-09T00:00:00Z"},{"id":"44402c6f-7890-4d10-8925-62a7f592c776","kind":"AR","date":"2026-10-12","name":"Reimburse","amount":772171.0,"settled_at":"2026-10-12","open_tx_id":null,"settle_tx_id":"9d7e46c9-6ffe-4499-9fb9-7c22a1949fc9","created_at":"2026-10-12T00:00:00Z"},{"id":"afa417aa-c06a-479f-ad7a-8ad57e5d4655","kind":"AR","date":"2026-10-16","name":"Reimburse","amount":14000.0,"settled_at":"2026-10-16","open_tx_id":null,"settle_tx_id":"dbc06d37-ee2e-48d7-b2c5-b1cd948f467b","created_at":"2026-10-16T00:00:00Z"},{"id":"d68d40cc-756f-4230-8ddc-a2266edaac57","kind":"AR","date":"2026-10-16","name":"Pinjem Akbar","amount":1000000.0,"settled_at":null,"open_tx_id":"334b55ae-6b2b-40c0-bdda-9bacfcf56e71","settle_tx_id":null,"created_at":"2026-10-16T00:00:00Z"},{"id":"92bdda47-d9ec-4318-b1a6-43b9948dd1fb","kind":"AR","date":"2026-10-18","name":"Telor","amount":50000.0,"settled_at":null,"open_tx_id":"50eea45b-9421-498c-a2d9-ae90e40d620e","settle_tx_id":null,"created_at":"2026-10-18T00:00:00Z"},{"id":"8b7ec204-68b5-44bc-956d-e989476b11c9","kind":"AR","date":"2026-10-19","name":"Sarapan + makan siang","amount":42000.0,"settled_at":null,"open_tx_id":"cc2a2f2a-f1a0-4165-bb6f-f92ec6441de6","settle_tx_id":null,"created_at":"2026-10-19T00:00:00Z"},{"id":"9cdd9e0e-745b-4ab1-8aa7-200fbf563773","kind":"AR","date":"2026-10-21","name":"Makan malam","amount":32000.0,"settled_at":null,"open_tx_id":"7fcfd534-7a82-439a-bd13-e9822d9b19c4","settle_tx_id":null,"created_at":"2026-10-21T00:00:00Z"},{"id":"d1647612-3aa2-4a35-9f08-ab43ba3f7b2a","kind":"AR","date":"2026-10-22","name":"Makan siang","amount":35000.0,"settled_at":null,"open_tx_id":"e1b16236-cde8-4944-9de1-7769f2cf4a3d","settle_tx_id":null,"created_at":"2026-10-22T00:00:00Z"},{"id":"f1304ddf-bf0a-4ea1-bfdf-e19561c3e694","kind":"AR","date":"2026-10-24","name":"Makan malam","amount":33850.0,"settled_at":null,"open_tx_id":"5308bb72-c9d0-48d5-886c-c07394ba8a66","settle_tx_id":null,"created_at":"2026-10-24T00:00:00Z"},{"id":"38c224ba-66ed-4b47-8708-7a86daf8c121","kind":"AR","date":"2026-10-25","name":"Makan malam","amount":50000.0,"settled_at":null,"open_tx_id":"957a04a5-88bf-4caf-acdc-9a34a357648d","settle_tx_id":null,"created_at":"2026-10-25T00:00:00Z"},{"id":"c88f2dee-8075-4cde-91cb-a22344e2cfa1","kind":"AR","date":"2026-10-26","name":"Telor","amount":46000.0,"settled_at":null,"open_tx_id":"3c371aca-36a7-4819-88bb-71d595b15223","settle_tx_id":null,"created_at":"2026-10-26T00:00:00Z"},{"id":"be8d42d0-0594-472e-b8cf-8ceacde476e6","kind":"AR","date":"2026-10-26","name":"Indomie + shampoo","amount":77700.0,"settled_at":null,"open_tx_id":"8abcd824-ea0c-4ac5-9c1b-e25f10fc56e1","settle_tx_id":null,"created_at":"2026-10-26T00:00:00Z"},{"id":"ffd7136b-bfd2-4adc-a5bb-3bd98a00ca9a","kind":"AR","date":"2026-10-27","name":"Bensin tol","amount":100000.0,"settled_at":null,"open_tx_id":"f32ec346-adab-4920-8fe1-86f25e6837d2","settle_tx_id":null,"created_at":"2026-10-27T00:00:00Z"},{"id":"6ee47fcb-5a37-41c2-ad85-488e6e865236","kind":"AR","date":"2026-10-27","name":"Bedak","amount":170400.0,"settled_at":null,"open_tx_id":"2f8c9202-e1ff-42e1-b6c7-fe1d3c054da4","settle_tx_id":null,"created_at":"2026-10-27T00:00:00Z"},{"id":"0d95c441-bd9e-4492-9523-208af7fe2656","kind":"AR","date":"2026-10-27","name":"Lampu","amount":990000.0,"settled_at":null,"open_tx_id":"6b50663e-4d38-4f3f-bd7e-d8f7fee6974e","settle_tx_id":null,"created_at":"2026-10-27T00:00:00Z"},{"id":"5d747136-38a9-40c2-86d3-1b3c2d155a0d","kind":"AP","date":"2026-07-14","name":"Titip","amount":100000000.0,"settled_at":null,"open_tx_id":null,"settle_tx_id":null,"created_at":"2026-07-14T00:00:00Z"},{"id":"0f11c72a-4357-4dfb-8b21-f92135a91969","kind":"AP","date":"2026-07-29","name":"Titip","amount":100000000.0,"settled_at":null,"open_tx_id":null,"settle_tx_id":null,"created_at":"2026-07-29T00:00:00Z"}],"periods":[{"id":"ef786ea6-75b2-491d-95b5-ca4bb725c222","month":"2026-10-01","income":7500000.0,"target_eomb":2000000.0}],"items":[{"id":"0afbc9c6-ec2c-458f-8be8-c1315b119a2f","period_id":"ef786ea6-75b2-491d-95b5-ca4bb725c222","category_id":"3f70a65f-0378-48f1-a254-ed997945d175","price":30000,"unit":"Day","qty":22,"sort":0},{"id":"924700d2-38f5-44b2-9f7a-33c078fece5a","period_id":"ef786ea6-75b2-491d-95b5-ca4bb725c222","category_id":"ae290bdd-5d4b-42cc-9d64-e3dc7ad25756","price":20000,"unit":"Day","qty":22,"sort":1},{"id":"b9f7da2e-e103-4ba0-88e6-250615ee7ef0","period_id":"ef786ea6-75b2-491d-95b5-ca4bb725c222","category_id":"d9514b8b-439e-4fee-a7aa-464c305a9332","price":1000000,"unit":"Month","qty":1,"sort":2},{"id":"b9491f78-7b23-4f3b-812c-9967346a7fbe","period_id":"ef786ea6-75b2-491d-95b5-ca4bb725c222","category_id":"8ffb09af-3feb-460f-851a-a62c57bff512","price":1000000,"unit":"Month","qty":1,"sort":3},{"id":"501cc817-b56c-404d-b5a9-e44ea5382515","period_id":"ef786ea6-75b2-491d-95b5-ca4bb725c222","category_id":"b7c4407d-f5b9-4d9b-be86-90305d2d8eb5","price":500000,"unit":"Month","qty":1,"sort":4},{"id":"416cab5e-77fb-4f3b-9573-c6d971966159","period_id":"ef786ea6-75b2-491d-95b5-ca4bb725c222","category_id":"72cf0342-5b13-4e55-8e8c-d866f8a4d0e6","price":79900,"unit":"Month","qty":1,"sort":5},{"id":"dfa06245-980b-48c8-9f74-cc102b9a787a","period_id":"ef786ea6-75b2-491d-95b5-ca4bb725c222","category_id":"7558401c-84bc-4372-9ac2-038e0467ab53","price":185000,"unit":"Month","qty":1,"sort":6},{"id":"530d475a-d73c-490f-97d2-385e888dc69f","period_id":"ef786ea6-75b2-491d-95b5-ca4bb725c222","category_id":"00de6c0d-258c-4bad-8f85-8cf24b373be7","price":360000,"unit":"Month","qty":1,"sort":7},{"id":"53c87fe9-b90e-451e-ba15-4a14fde766e8","period_id":"ef786ea6-75b2-491d-95b5-ca4bb725c222","category_id":"1cd72f49-bbde-4453-9232-23e58d66d09e","price":200000,"unit":"Month","qty":1,"sort":8},{"id":"f6ae42d4-5c86-4552-93a0-4238e338a875","period_id":"ef786ea6-75b2-491d-95b5-ca4bb725c222","category_id":"5f5e4b19-a069-4983-9927-be131cb979d3","price":0,"unit":"Month","qty":1,"sort":9},{"id":"b10efe8c-2999-4ac2-9b55-8160cd475869","period_id":"ef786ea6-75b2-491d-95b5-ca4bb725c222","category_id":"08647979-ccbf-4f5a-9f12-64a8dc30bf74","price":0,"unit":"Month","qty":1,"sort":10}]}/*END BACKFILL*/;
+
+// ---- formatting & dates ----------------------------------------------------------------
+const nf = new Intl.NumberFormat('id-ID', { maximumFractionDigits: 0 });
+const fmt = n => nf.format(Math.round(Math.abs(Number(n) || 0)));
+const fmtSigned = n => (n < 0 ? '−' : n > 0 ? '+' : '') + fmt(n);
+const pad = n => String(n).padStart(2, '0');
+const iso = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const lsGet = k => { try { return localStorage.getItem(k); } catch { return null; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
+const lsDel = k => { try { localStorage.removeItem(k); } catch {} };
+// Prototype only: a simulated "today" lets the month rollover and budget lock be tested.
+const SIM_KEY = 'trax.mvp.today';
+const today = () => lsGet(SIM_KEY) || iso(new Date());
+const parseISO = s => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
+const curMonth = () => today().slice(0, 7) + '-01';
+const addMonths = (m, k) => { const d = parseISO(m); return iso(new Date(d.getFullYear(), d.getMonth() + k, 1)); };
+const monthLabel = m => parseISO(m).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+const dayLabel = s => s === today() ? 'Today'
+  : parseISO(s).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+const digits = s => String(s).replace(/\D/g, '').replace(/^0+/, '').slice(0, 13);
+
+function usePersisted(key, init) {
+  const [v, setV] = useState(() => lsGet(key) ?? init);
+  return [v, x => { setV(x); lsSet(key, x); }];
+}
+
+let toastFn = () => {};
+const toast = m => toastFn(m);
+
+// ---- local store -----------------------------------------------------------------------
+// Stands in for the Supabase schema in ../supabase/001_init.sql: same tables, same rules
+// (budget lock, ensure_budget copy, transaction = signed lines). Methods are async so the
+// screens are written the way they will be against a real backend.
+const KEY = 'trax.mvp.v4';
+const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36));
+const clone = v => JSON.parse(JSON.stringify(v));
+const stamp = () => new Date().toISOString();
+let db = null;
+
+function loadDb() {
+  if (db) return db;
+  try {
+    const s = JSON.parse(lsGet(KEY));
+    if (s && s.v === 4) return (db = s);
+  } catch {}
+  // Older versions are dropped, not migrated: the prototype only ever holds dummy data.
+  for (const old of ['trax.mvp.v1', 'trax.mvp.v2', 'trax.mvp.v3', 'trax.lastPocket']) lsDel(old);
+  db = seed();
+  ensureOthers(db);
+  saveDb();
+  return db;
+}
+const saveDb = () => lsSet(KEY, JSON.stringify(db));
+
+// Every expense and income has a category; "Others" is the catch-all and the default.
+// Only transfers, balance adjustments and AR/AP stay out of it. Run on the seed, which
+// leaves those categories unset.
+const ADJUSTMENTS = ['Opening balance', 'Balance adjustment'];
+function othersId(categories, kind) {
+  return (categories.find(c => c.name === 'Others' && c.kind === kind && !c.archived)
+    ?? categories.find(c => c.kind === kind && !c.archived))?.id ?? null;
+}
+// AR and AP are system categories (kind "debt") for the transactions the AR/AP screen
+// creates. They are neither spending nor income, so budgets and totals skip them.
+const debtCatId = (categories, kind) => categories.find(c => c.kind === 'debt' && c.name === kind)?.id ?? null;
+function ensureOthers(s) {
+  for (const kind of ['expense', 'income']) {
+    if (!s.categories.some(c => c.name === 'Others' && c.kind === kind && !c.archived))
+      s.categories.push({ id: uid(), name: 'Others', kind, sort: 999, archived: false, created_at: stamp() });
+  }
+  for (const [name, sort] of [['AR', 1000], ['AP', 1001]]) {
+    if (!debtCatId(s.categories, name)) s.categories.push({ id: uid(), name, kind: 'debt', sort, archived: false, created_at: stamp() });
+  }
+  for (const t of s.transactions) {
+    if (t.category_id || ADJUSTMENTS.includes(t.name)) continue;
+    const k = shape(t.lines).kind;
+    if (k === 'out' || k === 'in') t.category_id = othersId(s.categories, k === 'out' ? 'expense' : 'income');
+  }
+}
+
+// Dummy data shaped like the sheet's Oct 26 tab: last month and this month up to today, with
+// the same kinds of rows — salary, daily lunch, top-ups with admin fees, cash withdrawals,
+// split payments, the Kos sub-pocket, a loan that becomes AR, funds held for others as AP.
+function seed() {
+  if (BACKFILL) return clone(BACKFILL);
+  const s = { v: 4, pockets: [], categories: [], transactions: [], debts: [], periods: [], items: [] };
+  const pocket = (name, extra = {}) => { const p = { id: uid(), name, parent_id: null, sort: s.pockets.length, archived: false, created_at: stamp(), ...extra }; s.pockets.push(p); return p.id; };
+  const P = {};
+  P.BCA = pocket('BCA');
+  P.Kos = pocket('Kos', { parent_id: P.BCA });
+  for (const n of ['Mandiri', 'Cash', 'Gopay', 'ShopeePay', 'Ovo']) P[n] = pocket(n);
+
+  const C = {};
+  DEFAULT_BUDGET.forEach(([name], i) => { C[name] = uid(); s.categories.push({ id: C[name], name, kind: 'expense', sort: i, archived: false, created_at: stamp() }); });
+  C.Salary = uid();
+  s.categories.push({ id: C.Salary, name: 'Salary', kind: 'income', sort: 100, archived: false, created_at: stamp() });
+  for (const [name, sort] of [['AR', 1000], ['AP', 1001]]) { C[name] = uid(); s.categories.push({ id: C[name], name, kind: 'debt', sort, archived: false, created_at: stamp() }); }
+
+  const cur = curMonth(), prev = addMonths(cur, -1);
+  for (const month of [prev, cur]) {
+    const pid = uid();
+    s.periods.push({ id: pid, month, income: 7500000, target_eomb: 2000000 });
+    DEFAULT_BUDGET.forEach(([name, price, unit, qty], i) => s.items.push({ id: uid(), period_id: pid, category_id: C[name], price, unit, qty, sort: i }));
+  }
+
+  let seq = 0;
+  const tx = (date, name, cat, lines) => {
+    const t = { id: uid(), date, name, category_id: cat ? C[cat] : null,
+      created_at: `${date}T08:00:${pad(Math.floor(seq / 60) % 60)}.${String(seq++).padStart(3, '0')}Z`,
+      lines: lines.map(([p, amount]) => ({ id: uid(), pocket_id: P[p], amount })) };
+    s.transactions.push(t);
+    return t;
+  };
+  let loanTx = null;
+
+  // Deterministic pseudo-random amounts so a reset always gives the same data.
+  let r = 7;
+  const rnd = (lo, hi, step = 100) => { r = (r * 16807) % 2147483647; return lo + Math.floor(((r % 10000) / 10000) * ((hi - lo) / step + 1)) * step; };
+
+  tx(prev, 'Opening balance', null, [['BCA', 6433815], ['Kos', 3389642], ['Mandiri', 34967679], ['Cash', 700000], ['Gopay', 107083], ['ShopeePay', 48397], ['Ovo', 21089]]);
+  const end = today();
+  for (const month of [prev, cur]) {
+    const days = new Date(parseISO(month).getFullYear(), parseISO(month).getMonth() + 1, 0).getDate();
+    for (let d = 1; d <= days; d++) {
+      const date = month.slice(0, 8) + pad(d);
+      if (date > end) break;
+      const dow = parseISO(date).getDay(), weekday = dow > 0 && dow < 6;
+      if (d === 1) tx(date, 'Spotify', 'Spotify', [['Mandiri', -79900]]);
+      if (d === 2) tx(date, 'Salary', 'Salary', [['BCA', 6660829]]);
+      if (d === 3) tx(date, 'Wifi', null, [['Kos', -807423]]);
+      if (d === 5) tx(date, 'Gym', 'Gym', [['BCA', -185000]]);
+      if (d === 1 || d === 15) tx(date, 'Top up from Mandiri to ShopeePay', null, [['Mandiri', -201000], ['ShopeePay', 200000]]);
+      if (d === 1) tx(date, 'Top up from Mandiri to Gopay', null, [['Mandiri', -801200], ['Gopay', 800000]]);
+      if (d === 12) tx(date, 'Car wash', 'Hobby', [['BCA', -50000], ['Cash', -10000]]);
+      if (d === 15) tx(date, 'Top up from Mandiri to Cash', null, [['Mandiri', -300000], ['Cash', 300000]]);
+      if (d === 16 && month === prev) loanTx = tx(date, 'Loan to Akbar', 'AR', [['BCA', -1000000]]);
+      if (d === 19) tx(date, 'Rent received', null, [['Kos', 1000000]]);
+      if (d === 27) tx(date, 'Top up from Mandiri to Gopay', null, [['Mandiri', -301200], ['Gopay', 300000]]);
+      if (d === 27) tx(date, 'Claude', 'Claude', [['Gopay', -349000]]);
+      if (weekday) {
+        tx(date, 'Lunch', 'Office lunch', [[rnd(0, 3, 1) ? 'BCA' : 'ShopeePay', -rnd(22000, 38000)]]);
+        if (dow === 1) tx(date, 'E-toll top up', 'Office transport', [['Mandiri', -100000]]);
+        if (rnd(0, 1, 1)) tx(date, 'Snacks', null, [['BCA', -rnd(7000, 40000)]]);
+        if (dow === 3) tx(date, 'Coffee', 'Hobby', [['BCA', -17000]]);
+      } else {
+        if (dow === 6) tx(date, 'Tennis', 'Hobby', [['BCA', -rnd(117000, 200000, 500)], ['Cash', -rnd(5000, 20000, 1000)]]);
+        if (dow === 6 && d % 2) tx(date, 'Gas', 'Gas/toll', [['BCA', -300000]]);
+        tx(date, 'Dinner', 'Date', [[rnd(0, 3, 1) ? 'BCA' : 'Gopay', -rnd(90000, 320000)]]);
+      }
+    }
+  }
+
+  const debt = (kind, date, name, amount, settled_at = null, open_tx_id = null) =>
+    s.debts.push({ id: uid(), kind, date, name, amount, settled_at, open_tx_id, settle_tx_id: null, created_at: stamp() });
+  debt('AR', prev.slice(0, 8) + '16', 'Loan to Akbar', 1000000, null, loanTx?.id);
+  debt('AR', cur, 'Mom\'s lunch', 32786);
+  debt('AR', prev.slice(0, 8) + '05', 'Hotel split', 397514, prev.slice(0, 8) + '20');
+  debt('AP', prev, 'Funds held for family', 20000000);
+  return s;
+}
+
+function withNet(t) {
+  const lines = t.lines.map(l => ({ ...l, amount: Number(l.amount) }));
+  return { ...t, lines, net: lines.reduce((s, l) => s + l.amount, 0) };
+}
+
+const byCreatedDesc = (a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0);
+const bySort = (a, b) => a.sort - b.sort || (a.created_at < b.created_at ? -1 : 1);
+
+function guardPeriod(periodId) {
+  const p = db.periods.find(p => p.id === periodId);
+  if (!p) throw new Error('Budget not found');
+  if (p.month <= curMonth()) throw new Error(`The ${monthLabel(p.month)} budget is locked. Edit next month's draft instead.`);
+}
+
+// Returns the period for a month, creating it as a copy of the latest earlier one: that
+// copy is how a month "locks on the 1st" — whatever draft exists becomes the budget, and
+// if none was made, last month's budget carries over.
+function ensurePeriod(month) {
+  const found = db.periods.find(p => p.month === month);
+  if (found) return found;
+  if (month > addMonths(curMonth(), 1)) throw new Error('Budgets can only be created up to next month');
+  const src = db.periods.filter(p => p.month < month).sort((a, b) => (a.month < b.month ? 1 : -1))[0];
+  const p = { id: uid(), month, income: src?.income ?? 0, target_eomb: src?.target_eomb ?? 0 };
+  db.periods.push(p);
+  if (src) for (const i of db.items.filter(i => i.period_id === src.id)) {
+    if (!db.categories.find(c => c.id === i.category_id)?.archived) db.items.push({ ...i, id: uid(), period_id: p.id });
+  }
+  saveDb();
+  return p;
+}
+
+// `changed`: the debt's amount or kind changed. Otherwise an existing transaction keeps its
+// lines, because backfilled AR can differ from what left the pocket (RAB is the source of
+// truth for the AR amount, the sheet for the money) or be paid from two pockets.
+function syncDebtTx(d, which, pocketId, changed = false) {
+  const key = which + '_tx_id';
+  const existing = d[key] && db.transactions.find(t => t.id === d[key]);
+  const samePocket = pocketId === undefined || pocketId === existing?.lines[0]?.pocket_id;
+  if (pocketId === undefined) pocketId = existing ? existing.lines[0].pocket_id : null;
+  if (!pocketId) {
+    if (existing) db.transactions = db.transactions.filter(t => t.id !== existing.id);
+    d[key] = null;
+    return;
+  }
+  // AR opens with money going out and settles with it coming back; AP is the reverse.
+  const out = (d.kind === 'AR') === (which === 'open');
+  const row = { date: which === 'open' ? d.date : d.settled_at, name: which === 'open' ? d.name : `Settled: ${d.name}`,
+    category_id: debtCatId(db.categories, d.kind), lines: [{ id: uid(), pocket_id: pocketId, amount: out ? -d.amount : d.amount }] };
+  if (existing && samePocket && !changed) Object.assign(existing, { ...row, lines: existing.lines });
+  else if (existing) Object.assign(existing, row);
+  else { const t = { id: uid(), created_at: stamp(), ...row }; db.transactions.push(t); d[key] = t.id; }
+}
+
+const tick = v => new Promise(res => setTimeout(() => res(clone(v)), 0));
+const store = {
+  async base() {
+    loadDb();
+    const bal = {};
+    for (const t of db.transactions) for (const l of t.lines) bal[l.pocket_id] = (bal[l.pocket_id] || 0) + l.amount;
+    return tick({ pockets: [...db.pockets].sort(bySort), categories: [...db.categories].sort(bySort), bal,
+      debts: [...db.debts].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : byCreatedDesc(a, b))) });
+  },
+  async month(m) {
+    const next = addMonths(m, 1);
+    const rows = db.transactions.filter(t => t.date >= m && t.date < next)
+      .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : byCreatedDesc(a, b)));
+    return tick(rows.map(withNet));
+  },
+  // Latest movements of these pockets, each with the balance right after it. Transfers are
+  // listed too, as income on the receiving pocket (kredit) and expense on the sending one
+  // (debit). The amount is only what these pockets gained or lost, not the whole transaction,
+  // so a transfer between two pockets of the same account nets to zero and is left out.
+  async pocketActivity(pocketIds, limit = 10) {
+    const rows = [];
+    let running = db.transactions.reduce((s, t) => s + t.lines.filter(l => pocketIds.includes(l.pocket_id)).reduce((a, l) => a + l.amount, 0), 0);
+    for (const t of [...db.transactions].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : byCreatedDesc(a, b)))) {
+      const tx = withNet(t);
+      const lines = tx.lines.filter(l => pocketIds.includes(l.pocket_id));
+      const amount = lines.reduce((s, l) => s + l.amount, 0);
+      const after = running;
+      running -= amount;
+      if (lines.length && amount) rows.push({ tx, amount, after });
+      if (rows.length === limit) break;
+    }
+    return tick(rows);
+  },
+  async period(month) {
+    const p = ensurePeriod(month);
+    const items = db.items.filter(i => i.period_id === p.id).sort((a, b) => a.sort - b.sort)
+      .map(i => ({ ...i, total: i.price * i.qty }));
+    return tick({ ...p, items });
+  },
+  async saveTx({ id, date, name, category_id, lines }) {
+    if (!lines.length) throw new Error('A transaction needs at least one pocket');
+    const row = { date, name, category_id, lines: lines.map(l => ({ id: uid(), pocket_id: l.pocket_id, amount: l.amount })) };
+    if (id) {
+      const t = db.transactions.find(t => t.id === id);
+      if (!t) throw new Error('Transaction not found');
+      Object.assign(t, row);
+    } else db.transactions.push({ id: uid(), created_at: stamp(), ...row });
+    saveDb(); return tick(true);
+  },
+  async deleteTx(id) { db.transactions = db.transactions.filter(t => t.id !== id); saveDb(); return tick(true); },
+  async savePocket(id, row) {
+    if (id) Object.assign(db.pockets.find(p => p.id === id), row);
+    else { id = uid(); db.pockets.push({ id, archived: false, sort: db.pockets.length, created_at: stamp(), ...row }); }
+    saveDb(); return tick(id);
+  },
+  async saveCategory(id, row) {
+    if (id) Object.assign(db.categories.find(c => c.id === id), row);
+    else { id = uid(); db.categories.push({ id, archived: false, sort: db.categories.length, created_at: stamp(), ...row }); }
+    saveDb(); return tick(id);
+  },
+  // Archive rather than delete: past transactions and locked budgets keep pointing at it.
+  // It also leaves next month's draft, since budgeting a hidden category makes no sense.
+  async archiveCategory(id, archived) {
+    db.categories.find(c => c.id === id).archived = archived;
+    if (archived) {
+      const draft = ensurePeriod(addMonths(curMonth(), 1));
+      db.items = db.items.filter(i => !(i.period_id === draft.id && i.category_id === id));
+    }
+    saveDb(); return tick(true);
+  },
+  async saveItem(periodId, id, row) {
+    guardPeriod(periodId);
+    if (id) Object.assign(db.items.find(i => i.id === id), row);
+    else db.items.push({ id: uid(), period_id: periodId, sort: db.items.filter(i => i.period_id === periodId).length, ...row });
+    saveDb(); return tick(true);
+  },
+  async deleteItem(item) { guardPeriod(item.period_id); db.items = db.items.filter(i => i.id !== item.id); saveDb(); return tick(true); },
+  async savePeriod(id, row) { guardPeriod(id); Object.assign(db.periods.find(p => p.id === id), row); saveDb(); return tick(true); },
+  // A debt can carry two transactions in the AR/AP categories: one when it is opened (AR: money
+  // lent out of a pocket, AP: money received into one) and the reverse when it is settled.
+  // pocketId: a pocket id, null for "no transaction", undefined to keep the current one.
+  txPocket(id) { return (id && db.transactions.find(t => t.id === id)?.lines[0]?.pocket_id) || null; },
+  async settleDebt(id, pocketId) {
+    const d = db.debts.find(d => d.id === id);
+    d.settled_at = today();
+    syncDebtTx(d, 'settle', pocketId);
+    saveDb(); return tick(true);
+  },
+  async unsettleDebt(id) {
+    const d = db.debts.find(d => d.id === id);
+    d.settled_at = null;
+    syncDebtTx(d, 'settle', null);
+    saveDb(); return tick(true);
+  },
+  async saveDebt(id, row, pocketId) {
+    let d = id && db.debts.find(d => d.id === id);
+    const changed = !d || d.amount !== row.amount || d.kind !== row.kind;
+    if (d) Object.assign(d, row);
+    else { d = { id: uid(), settled_at: null, open_tx_id: null, settle_tx_id: null, created_at: stamp(), ...row }; db.debts.push(d); }
+    syncDebtTx(d, 'open', pocketId, changed);
+    if (d.settle_tx_id) syncDebtTx(d, 'settle', undefined, changed);
+    saveDb(); return tick(d.id);
+  },
+  async deleteDebt(id) {
+    const d = db.debts.find(d => d.id === id);
+    db.transactions = db.transactions.filter(t => t.id !== d.open_tx_id && t.id !== d.settle_tx_id);
+    db.debts = db.debts.filter(d => d.id !== id);
+    saveDb(); return tick(true);
+  },
+  reset() { lsDel(KEY); db = null; loadDb(); },
+};
+
+function totals(data) {
+  // Like the sheet's Saldo Total (BCA → Ovo): sub-pockets such as Kos are set-aside money inside
+  // an account, shown under "BCA Total" but not counted as spendable balance.
+  const balance = data.pockets.filter(p => !p.archived && !p.parent_id).reduce((s, p) => s + (data.bal[p.id] || 0), 0);
+  const open = k => data.debts.filter(d => d.kind === k && !d.settled_at).reduce((s, d) => s + d.amount, 0);
+  return { balance, ar: open('AR'), ap: open('AP') };
+}
+
+// A transaction is a transfer when exactly one pocket gives and one receives, and the
+// giver loses at least what the receiver gets — the difference is the admin fee.
+function shape(lines) {
+  const neg = lines.filter(l => l.amount < 0), pos = lines.filter(l => l.amount > 0);
+  if (!pos.length) return { kind: 'out' };
+  if (!neg.length) return { kind: 'in' };
+  if (neg.length === 1 && pos.length === 1 && -neg[0].amount >= pos[0].amount)
+    return { kind: 'transfer', from: neg[0], to: pos[0], fee: -neg[0].amount - pos[0].amount };
+  return { kind: 'custom' };
+}
+
+// Usage per category: the sum of each transaction's net (negative for spending).
+function usage(txs) {
+  const used = {};
+  for (const t of txs) if (t.category_id) used[t.category_id] = (used[t.category_id] || 0) + t.net;
+  return used;
+}
+
+// ---- icons -----------------------------------------------------------------------------
+const Icon = ({ d, size = 24 }) => html`<svg width=${size} height=${size} viewBox="0 0 24 24" fill="none"
+  stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+const I = {
+  wallet: html`<path d="M20 7H5a2 2 0 0 1 0-4h13v4"/><path d="M3 5v14a2 2 0 0 0 2 2h15V7"/><circle cx="16" cy="14" r="1.5"/>`,
+  list: html`<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>`,
+  pie: html`<path d="M21 12A9 9 0 1 1 12 3v9z"/><path d="M15 3.5A9 9 0 0 1 20.5 9H15z"/>`,
+  swap: html`<path d="M7 4 3 8l4 4M3 8h14M17 20l4-4-4-4M21 16H7"/>`,
+  plus: html`<path d="M12 5v14M5 12h14"/>`,
+  left: html`<path d="m15 18-6-6 6-6"/>`,
+  right: html`<path d="m9 18 6-6-6-6"/>`,
+  lock: html`<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>`,
+  del: html`<path d="M21 5H9l-7 7 7 7h12a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1z"/><path d="m17 9-6 6M11 9l6 6"/>`,
+};
+
+// ---- shell -----------------------------------------------------------------------------
+function App() {
+  return html`<${Main} />`;
+}
+
+let toastTimer;
+function Main() {
+  const [tab, setTab] = usePersisted('trax.tab', 'balance');
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState(null);
+  const [ver, setVer] = useState(0);
+  const [sheet, setSheet] = useState(null);
+  const [msg, setMsg] = useState(null);
+  toastFn = m => { setMsg(m); clearTimeout(toastTimer); toastTimer = setTimeout(() => setMsg(null), 3000); };
+
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      try {
+        const d = await store.base();
+        if (live) { setData(d); setErr(null); }
+      } catch (e) { if (live) setErr(e.message); }
+    })();
+    return () => { live = false; };
+  }, [ver]);
+
+  const reload = () => setVer(v => v + 1);
+  const open = (type, props = {}) => setSheet({ type, props });
+  const close = () => setSheet(null);
+  const done = () => { setSheet(null); reload(); };
+
+  if (!data) return html`<div class="center">
+    ${err ? html`<b>Couldn't load</b><div class="mut" style="font-size:14px">${err}</div>
+      <button class="secondary" onClick=${reload}>Try again</button>
+      <button class="secondary" onClick=${() => { store.reset(); reload(); }}>Reset dummy data</button>`
+    : html`<div class="mut">Loading…</div>`}</div>`;
+
+  const ctx = { data, ver, open, reload };
+  const tabs = [['balance', 'Balance', I.wallet], ['history', 'History', I.list], ['budget', 'Budget', I.pie], ['debt', 'AR/AP', I.swap]];
+  const Screen = { balance: BalanceScreen, history: HistoryScreen, budget: BudgetScreen, debt: DebtScreen }[tab] || BalanceScreen;
+  const Sheet = sheet && { proto: ProtoSheet, tx: TxSheet, pocket: PocketSheet, debt: DebtSheet, item: ItemSheet, period: PeriodSheet, category: CategorySheet }[sheet.type];
+
+  return html`<div class="app">
+    <${Screen} key=${today()} ...${ctx} />
+    ${(tab === 'balance' || tab === 'history') && html`<button class="fab" aria-label="Add transaction" onClick=${() => open('tx')}><${Icon} d=${I.plus} size=${28} /></button>`}
+    <nav class="tabbar">${tabs.map(([k, label, icon]) => html`
+      <button key=${k} class=${'tab' + (tab === k ? ' on' : '')} onClick=${() => setTab(k)}><${Icon} d=${icon} />${label}</button>`)}
+    </nav>
+    ${Sheet && html`<${Sheet} ...${sheet.props} data=${data} open=${open} onClose=${close} onDone=${done} />`}
+    ${msg && html`<div class="toast" onClick=${() => setMsg(null)}>${msg}</div>`}
+  </div>`;
+}
+
+function Panel({ title, onClose, right, full, children, foot }) {
+  return html`<div class="overlay" onClick=${e => e.target === e.currentTarget && onClose()}>
+    <div class=${'panel' + (full ? ' full' : '')}>
+      <div class="panel-head"><button class="link" style="text-align:left" onClick=${onClose}>Cancel</button>
+        <b>${title}</b><span style="min-width:72px;text-align:right">${right}</span></div>
+      <div class="panel-body">${children}</div>
+      ${foot && html`<div class="foot">${foot}</div>`}
+    </div></div>`;
+}
+
+const Seg = ({ value, options, onChange }) => html`<div class="seg">${options.map(([k, label]) =>
+  html`<button key=${k} class=${value === k ? 'on' : ''} onClick=${() => onChange(k)}>${label}</button>`)}</div>`;
+
+const Loading = () => html`<div class="empty">Loading…</div>`;
+
+// ---- prototype controls ----------------------------------------------------------------
+function ProtoSheet({ onClose, onDone }) {
+  const [sim, setSim] = useState(lsGet(SIM_KEY) || '');
+  const apply = v => { if (v) lsSet(SIM_KEY, v); else lsDel(SIM_KEY); onDone(); };
+  return html`<${Panel} title="Prototype" onClose=${onClose}>
+    <div class="note">Data is stored in this browser only (localStorage) and seeded with dummy data.</div>
+    <div class="lbl">Simulated date</div>
+    <div class="field"><span>Today</span><input type="date" value=${sim || iso(new Date())} onInput=${e => setSim(e.target.value)} /></div>
+    <button class="secondary" onClick=${() => apply(sim)}>Use this date</button>
+    ${lsGet(SIM_KEY) && html`<button class="secondary" onClick=${() => apply('')}>Back to the real date</button>`}
+    <div class="note">To test the budget lock, jump to the 1st of next month: the draft becomes the active, locked budget.</div>
+    <div class="lbl">Data</div>
+    <button class="secondary danger" onClick=${() => { if (confirm('Delete all data and reseed with dummy data?')) { store.reset(); onDone(); } }}>Reset dummy data</button>
+    <div class="note">Reset uses the active simulated date as "today".</div>
+  <//>`;
+}
+
+// ---- Balance ---------------------------------------------------------------------------
+function BalanceScreen({ data, open }) {
+  const [mode, setMode] = usePersisted('trax.balanceMode', 'balance');
+  const [showArchived, setShowArchived] = useState(false);
+  const t = totals(data);
+  const value = t.balance - (mode === 'ap' || mode === 'both' ? t.ap : 0) + (mode === 'ar' || mode === 'both' ? t.ar : 0);
+  const active = data.pockets.filter(p => !p.archived);
+  const archived = data.pockets.filter(p => p.archived);
+  const kids = id => active.filter(p => p.parent_id === id);
+  const bal = id => data.bal[id] || 0;
+
+  const pocketRow = (p, sub) => html`<button key=${p.id} class=${'row' + (sub ? ' sub' : '')} onClick=${() => open('pocket', { pocket: p })}>
+    <div class="row-main"><div class="row-title">${p.name}</div></div>
+    <div class="row-amt num ${bal(p.id) < 0 ? 'neg' : ''}">${bal(p.id) < 0 ? '−' : ''}${fmt(bal(p.id))}</div></button>`;
+
+  return html`<div class="screen">
+    <div class="hero">
+      <button class="proto-btn" onClick=${() => open('proto')}>Prototype${lsGet(SIM_KEY) ? ' · ' + dayLabel(today()) : ''}</button>
+      <div class="hero-label">Total balance</div>
+      <div class="hero-num num">${value < 0 ? '−' : ''}Rp ${fmt(value)}</div>
+      <div class="pills">${[['balance', 'Balance'], ['ap', '− AP'], ['ar', '+ AR'], ['both', '− AP + AR']].map(([k, label]) =>
+        html`<button key=${k} class=${'pill' + (mode === k ? ' on' : '')} onClick=${() => setMode(k)}>${label}</button>`)}</div>
+    </div>
+    <div class="section-h"><span>Pockets</span></div>
+    ${active.filter(p => !p.parent_id || !active.some(x => x.id === p.parent_id)).map(p => {
+      const children = kids(p.id);
+      if (!children.length) return html`<div class="card" key=${p.id}>${pocketRow(p)}</div>`;
+      const sum = bal(p.id) + children.reduce((s, c) => s + bal(c.id), 0);
+      return html`<div class="card" key=${p.id}>
+        <button class="row" onClick=${() => open('pocket', { pocket: p, ids: [p.id, ...children.map(c => c.id)], title: p.name + ' Total' })}>
+          <div class="row-main"><div class="row-title" style="font-weight:600">${p.name} Total</div></div>
+          <div class="row-amt num">${fmt(sum)}</div></button>
+        ${pocketRow(p, true)}${children.map(c => pocketRow(c, true))}</div>`;
+    })}
+    <div class="card"><button class="add" onClick=${() => open('pocket', {})}><${Icon} d=${I.plus} size=${18} />New pocket</button></div>
+    ${archived.length > 0 && html`
+      <button class="note" onClick=${() => setShowArchived(!showArchived)}>${showArchived ? 'Hide' : 'Show'} ${archived.length} archived pocket${archived.length > 1 ? 's' : ''}</button>
+      ${showArchived && html`<div class="card">${archived.map(p => pocketRow(p))}</div>`}`}
+  </div>`;
+}
+
+// Tapping a pocket shows its latest spending; "Edit" switches to the settings form. The
+// account total row passes every pocket of the account in `ids` and has no settings.
+function PocketSheet(props) {
+  const { pocket, ids, title, onClose, open } = props;
+  const [editing, setEditing] = useState(!pocket);
+  const [rows, setRows] = useState(null);
+  useEffect(() => {
+    if (!pocket) return;
+    store.pocketActivity(ids ?? [pocket.id]).then(setRows).catch(e => toast(e.message));
+  }, []);
+  if (editing) return html`<${PocketForm} ...${props} />`;
+
+  return html`<${Panel} title=${title ?? pocket.name} onClose=${onClose}
+    right=${!ids && html`<button class="link" onClick=${() => setEditing(true)}>Edit</button>`}>
+    <div class="lbl" style="margin-top:4px">Last 10 transactions</div>
+    ${!rows ? html`<${Loading} />` : !rows.length ? html`<div class="empty">No transactions yet.</div>`
+      : html`<div class="card" style="margin-top:0">
+        <div class="row activity-head"><span class="row-main">Transaction</span><span>Amount</span><span>Balance after</span></div>
+        ${rows.map(({ tx, amount, after }) => html`
+        <button class="row activity" key=${tx.id} onClick=${() => open('tx', { tx })}>
+          <div class="row-main"><div class="row-title">${tx.name}</div><div class="row-sub">${dayLabel(tx.date)}</div></div>
+          <div class="row-amt num ${amount > 0 ? 'pos' : ''}">${fmtSigned(amount)}</div>
+          <div class="row-amt num mut">${after < 0 ? '−' : ''}${fmt(after)}</div></button>`)}</div>`}
+  <//>`;
+}
+
+function PocketForm({ data, pocket, onClose, onDone }) {
+  const isNew = !pocket;
+  const [name, setName] = useState(pocket?.name ?? '');
+  const [parent, setParent] = useState(pocket?.parent_id ?? '');
+  const [target, setTarget] = useState('');
+  const [busy, setBusy] = useState(false);
+  const bal = pocket ? data.bal[pocket.id] || 0 : 0;
+  const hasKids = pocket && data.pockets.some(p => p.parent_id === pocket.id && !p.archived);
+  const parents = data.pockets.filter(p => !p.archived && !p.parent_id && p.id !== pocket?.id);
+
+  const save = async () => {
+    if (!name.trim()) return toast('Pocket name is required');
+    setBusy(true);
+    try {
+      const row = { name: name.trim(), parent_id: parent || null };
+      let id = pocket?.id;
+      id = await store.savePocket(id, row);
+      // Setting a balance records the difference as a transaction, so history still adds up.
+      if (target !== '') {
+        const diff = Math.round((Number(target) - bal) * 100) / 100;
+        if (diff) await store.saveTx({ id: null, date: today(), name: isNew ? 'Opening balance' : 'Balance adjustment',
+          category_id: null, lines: [{ pocket_id: id, amount: diff }] });
+      }
+      onDone();
+    } catch (e) { toast(e.message); setBusy(false); }
+  };
+  const toggleArchive = async () => {
+    try { await store.savePocket(pocket.id, { archived: !pocket.archived }); onDone(); }
+    catch (e) { toast(e.message); }
+  };
+
+  return html`<${Panel} title=${isNew ? 'New pocket' : pocket.name} onClose=${onClose}
+    right=${html`<button class="link" disabled=${busy} onClick=${save}>Save</button>`}>
+    <div class="field"><span>Name</span><input value=${name} onInput=${e => setName(e.target.value)} /></div>
+    ${!hasKids && html`<div class="field"><span>Part of account</span>
+      <select value=${parent} onChange=${e => setParent(e.target.value)}>
+        <option value="">— None —</option>${parents.map(p => html`<option value=${p.id}>${p.name}</option>`)}</select></div>`}
+    <div class="lbl">Balance</div>
+    ${!isNew && html`<div class="field"><span>Current balance</span><b class="num">${bal < 0 ? '−' : ''}${fmt(bal)}</b></div>`}
+    <div class="field"><span>${isNew ? 'Opening balance' : 'Set balance to'}</span>
+      <input inputmode="numeric" placeholder=${isNew ? '0' : 'leave empty'} value=${target === '' ? '' : fmt(target)}
+        onInput=${e => setTarget(digits(e.target.value))} /></div>
+    ${!isNew && html`<button class="secondary ${pocket.archived ? '' : 'danger'}" style="margin-top:20px" onClick=${toggleArchive}>
+      ${pocket.archived ? 'Restore pocket' : 'Archive pocket'}</button>`}
+  <//>`;
+}
+
+// ---- History ---------------------------------------------------------------------------
+function HistoryScreen({ data, ver, open }) {
+  const [month, setMonth] = useState(curMonth());
+  const [txs, setTxs] = useState(null);
+  const [err, setErr] = useState(null);
+  useEffect(() => {
+    let live = true;
+    setTxs(null); setErr(null);
+    store.month(month).then(r => live && setTxs(r)).catch(e => live && setErr(e.message));
+    return () => { live = false; };
+  }, [month, ver]);
+
+  const cat = id => data.categories.find(c => c.id === id);
+  const pName = id => data.pockets.find(p => p.id === id)?.name ?? '?';
+  const groups = useMemo(() => {
+    const g = new Map();
+    for (const t of txs || []) { if (!g.has(t.date)) g.set(t.date, []); g.get(t.date).push(t); }
+    return [...g];
+  }, [txs]);
+
+  let spent = 0, earned = 0;
+  for (const t of txs || []) {
+    const c = cat(t.category_id);
+    if (!c) continue;
+    if (c.kind === 'income') earned += t.net;
+    else if (c.kind === 'expense') spent -= t.net;
+  }
+
+  const txRow = t => {
+    const s = shape(t.lines);
+    const c = cat(t.category_id);
+    const pockets = s.kind === 'transfer' ? `${pName(s.from.pocket_id)} → ${pName(s.to.pocket_id)}`
+      : [...new Set(t.lines.map(l => pName(l.pocket_id)))].join(' + ');
+    const amt = s.kind === 'transfer'
+      ? html`<div class="row-amt num mut">${fmt(s.to.amount)}${s.fee > 0 && html`<small>fee ${fmt(s.fee)}</small>`}</div>`
+      : html`<div class="row-amt num ${t.net > 0 ? 'pos' : ''}">${fmtSigned(t.net)}</div>`;
+    return html`<button key=${t.id} class="row" onClick=${() => open('tx', { tx: t })}>
+      <div class="row-main"><div class="row-title">${t.name}</div>
+        <div class="row-sub">${c ? c.name : html`<span class="dim">${s.kind === 'transfer' ? 'Transfer' : 'Adjustment'}</span>`} · ${pockets}</div></div>${amt}</button>`;
+  };
+
+  return html`<div class="screen">
+    <div class="title"><span>${monthLabel(month)}</span>
+      <span class="month-nav">
+        <button class="icon-btn" aria-label="Previous month" onClick=${() => setMonth(addMonths(month, -1))}><${Icon} d=${I.left} /></button>
+        <button class="icon-btn" aria-label="Next month" disabled=${month >= curMonth()} style=${month >= curMonth() ? 'opacity:.3' : ''}
+          onClick=${() => setMonth(addMonths(month, 1))}><${Icon} d=${I.right} /></button></span></div>
+    <div class="card"><div class="stat"><span class="mut">Spent</span><b class="num">${fmt(spent)}</b></div>
+      <div class="stat"><span class="mut">Income</span><b class="num pos">${fmt(earned)}</b></div></div>
+    ${err ? html`<div class="empty neg">${err}</div>` : !txs ? html`<${Loading} />`
+      : !txs.length ? html`<div class="empty">No transactions in ${monthLabel(month)} yet.</div>`
+      : groups.map(([date, list]) => {
+        const dayOut = list.filter(t => t.net < 0 && shape(t.lines).kind !== 'transfer').reduce((s, t) => s - t.net, 0);
+        return html`<div key=${date}><div class="section-h"><span>${dayLabel(date)}</span>${dayOut > 0 && html`<span class="num">−${fmt(dayOut)}</span>`}</div>
+          <div class="card">${list.map(txRow)}</div></div>`;
+      })}
+  </div>`;
+}
+
+// ---- transaction input -----------------------------------------------------------------
+const amtStr = n => { const r = Math.round(Math.abs(n) * 100) / 100; return r ? String(r) : ''; };
+const num = s => Number(s || 0);
+
+function newForm(data) {
+  const active = data.pockets.filter(p => !p.archived);
+  const last = lsGet('trax.lastPocket');
+  const def = active.some(p => p.id === last) ? last : active[0]?.id ?? '';
+  return { id: null, date: today(), name: '', categoryId: othersId(data.categories, 'expense'), kind: 'out',
+    lines: [{ pocketId: def, amt: '', sign: -1 }], from: def, to: '', tamt: '', fee: '', active: 'l0' };
+}
+
+function formFromTx(tx) {
+  const s = shape(tx.lines);
+  const f = { id: tx.id, date: tx.date, name: tx.name, categoryId: tx.category_id, from: '', to: '', tamt: '', fee: '', active: 'l0',
+    lines: tx.lines.map(l => ({ pocketId: l.pocket_id, amt: amtStr(l.amount), sign: Math.sign(l.amount) })) };
+  if (s.kind === 'transfer')
+    return { ...f, kind: 'transfer', from: s.from.pocket_id, to: s.to.pocket_id, tamt: amtStr(s.to.amount), fee: amtStr(s.fee), active: 'tamt' };
+  return { ...f, kind: s.kind };
+}
+
+const getAmt = (f, key) => key[0] === 'l' ? f.lines[Number(key.slice(1))]?.amt : f[key];
+const setAmt = (f, key, v) => key[0] === 'l'
+  ? { ...f, lines: f.lines.map((l, i) => i === Number(key.slice(1)) ? { ...l, amt: v } : l) }
+  : { ...f, [key]: v };
+
+function pressKey(f, k) {
+  let v = getAmt(f, f.active);
+  if (v == null) return f;
+  if (v.includes('.')) v = String(Math.round(Number(v)));
+  if (k === 'del') v = v.slice(0, -1);
+  else { v = (v + k).replace(/^0+/, ''); if (v.length > 12) return f; }
+  return setAmt(f, f.active, v);
+}
+
+function buildLines(f) {
+  let lines;
+  if (f.kind === 'transfer') {
+    if (!f.from || !f.to) return { error: 'Choose both pockets' };
+    if (f.from === f.to) return { error: 'From and to are the same pocket' };
+    lines = [{ pocket_id: f.from, amount: -(num(f.tamt) + num(f.fee)) }, { pocket_id: f.to, amount: num(f.tamt) }];
+  } else {
+    const sign = f.kind === 'out' ? -1 : 1;
+    lines = f.lines.map(l => ({ pocket_id: l.pocketId, amount: (f.kind === 'custom' ? l.sign : sign) * num(l.amt) }));
+  }
+  lines = lines.filter(l => l.amount !== 0);
+  if (!lines.length) return { error: 'Enter an amount' };
+  if (lines.some(l => !l.pocket_id)) return { error: 'Choose a pocket' };
+  return { lines };
+}
+
+function TxSheet({ data, tx, onClose, onDone }) {
+  const [f, setF] = useState(() => tx ? formFromTx(tx) : newForm(data));
+  const [busy, setBusy] = useState(false);
+  const up = patch => setF(s => ({ ...s, ...(typeof patch === 'function' ? patch(s) : patch) }));
+  const pockets = data.pockets.filter(p => !p.archived || f.lines.some(l => l.pocketId === p.id) || p.id === f.from || p.id === f.to);
+  const pName = id => data.pockets.find(p => p.id === id)?.name ?? '';
+
+  const setKind = kind => up(s => {
+    const lines = s.lines.length ? s.lines : [{ pocketId: s.from, amt: '', sign: -1 }];
+    const signed = s.kind === 'out' || s.kind === 'in' ? lines.map(l => ({ ...l, sign: s.kind === 'out' ? -1 : 1 })) : lines;
+    const c = data.categories.find(c => c.id === s.categoryId);
+    // Transfers carry no category: moving money between pockets is not spending.
+    const keepCat = c && (c.kind === 'debt' ? kind !== 'transfer' : kind === 'out' ? c.kind === 'expense' : kind === 'in' ? c.kind === 'income' : kind === 'custom');
+    const fallback = kind === 'out' ? othersId(data.categories, 'expense') : kind === 'in' ? othersId(data.categories, 'income') : null;
+    return { kind, lines: signed, categoryId: keepCat ? s.categoryId : fallback, from: s.from || lines[0].pocketId,
+      tamt: s.tamt || (kind === 'transfer' ? lines[0].amt : ''), active: kind === 'transfer' ? 'tamt' : 'l0' };
+  });
+
+  const cats = data.categories.filter(c => !c.archived || c.id === f.categoryId)
+    .filter(c => (c.kind === 'debt' ? c.id === f.categoryId : f.kind === 'out' ? c.kind === 'expense' : f.kind === 'in' ? c.kind === 'income' : true));
+
+  const save = async () => {
+    const { lines, error } = buildLines(f);
+    if (error) return toast(error);
+    // Transfers are named from their pockets; there is nothing to type.
+    const name = f.kind === 'transfer' ? `Top up from ${pName(f.from)} to ${pName(f.to)}` : f.name.trim();
+    if (!name) return toast('Enter a name');
+    setBusy(true);
+    try {
+      const category_id = f.kind === 'transfer' ? null
+        : f.categoryId ?? (f.kind === 'in' ? othersId(data.categories, 'income') : f.kind === 'out' ? othersId(data.categories, 'expense') : null);
+      await store.saveTx({ id: f.id, date: f.date, name, category_id, lines });
+      lsSet('trax.lastPocket', lines.find(l => l.amount < 0)?.pocket_id ?? lines[0].pocket_id);
+      onDone();
+    } catch (e) { toast(e.message); setBusy(false); }
+  };
+  const remove = async () => {
+    if (!confirm(`Delete "${f.name}"?`)) return;
+    try { await store.deleteTx(f.id); onDone(); } catch (e) { toast(e.message); }
+  };
+
+  const amtBtn = k => html`<button class=${'amt-field num' + (f.active === k ? ' on' : '')}
+    onClick=${() => { document.activeElement?.blur(); up({ active: k }); }}>${getAmt(f, k) ? fmt(getAmt(f, k)) : html`<span class="dim">0</span>`}</button>`;
+  const pocketSelect = (value, onChange, placeholder) => html`<select value=${value} onChange=${e => onChange(e.target.value)}>
+    ${placeholder && html`<option value="">${placeholder}</option>`}${pockets.map(p => html`<option value=${p.id}>${p.name}</option>`)}</select>`;
+  const setLine = (i, patch) => up(s => ({ lines: s.lines.map((l, j) => j === i ? { ...l, ...patch } : l) }));
+  const addLine = sign => up(s => ({ lines: [...s.lines, { pocketId: '', amt: '', sign }], active: 'l' + s.lines.length }));
+  const dropLine = i => up(s => ({ lines: s.lines.filter((_, j) => j !== i), active: 'l0' }));
+
+  // One page for every type: the big number is what the keypad types into, the type is a
+  // radio row like the category chips, and the pocket area below adapts to the type.
+  const single = (f.kind === 'out' || f.kind === 'in') && f.lines.length === 1;
+  const bigKey = f.kind === 'transfer' ? 'tamt' : single ? 'l0' : null;
+  const lineTotal = f.lines.reduce((s, l) => s + (f.kind === 'custom' ? l.sign : f.kind === 'out' ? -1 : 1) * num(l.amt), 0);
+  const bigValue = bigKey ? getAmt(f, bigKey) : Math.abs(lineTotal);
+  const pocketChips = (value, onPick) => html`<div class="chips">${pockets.filter(p => !p.archived).map(p => html`<button key=${p.id}
+    class=${'chip' + (value === p.id ? ' on' : '')} onClick=${() => onPick(p.id)}>${p.name}</button>`)}${single && html`
+    <button class="chip ghost" onClick=${() => addLine(f.kind === 'out' ? -1 : 1)}>+ Split</button>`}</div>`;
+
+  let pocketArea;
+  if (single) {
+    pocketArea = html`<div class="lbl">Pocket</div>${pocketChips(f.lines[0].pocketId, id => setLine(0, { pocketId: id }))}`;
+  } else if (f.kind === 'transfer') {
+    pocketArea = html`
+      <div class="lbl">From</div>${pocketChips(f.from, id => up({ from: id }))}
+      <div class="lbl">To</div>${pocketChips(f.to, id => up({ to: id }))}
+      <div class="field"><span>Admin fee</span>${amtBtn('fee')}</div>`;
+  } else {
+    pocketArea = html`<div class="lbl">Pockets</div>
+      ${f.lines.map((l, i) => html`<div class="line" key=${i}>
+        ${f.kind === 'custom' && html`<button class=${'sign ' + (l.sign < 0 ? 'neg' : 'pos')} onClick=${() => setLine(i, { sign: -l.sign })}>${l.sign < 0 ? '−' : '+'}</button>`}
+        ${pocketSelect(l.pocketId, v => setLine(i, { pocketId: v }), 'Pocket')}
+        ${amtBtn('l' + i)}
+        ${f.lines.length > 1 && html`<button class="x" aria-label="Remove line" onClick=${() => dropLine(i)}>×</button>`}</div>`)}
+      <div class="line"><button class="chip ghost" onClick=${() => addLine(f.kind === 'in' ? 1 : -1)}>+ Pocket</button></div>`;
+  }
+
+  return html`<${Panel} full title=${f.id ? 'Edit transaction' : 'New transaction'} onClose=${onClose}
+    right=${f.id && html`<button class="link danger" onClick=${remove}>Delete</button>`}
+    foot=${html`
+      <div class="keypad" style="padding:0 0 8px">${['1', '2', '3', '4', '5', '6', '7', '8', '9', '000', '0', 'del'].map(k => html`
+        <button key=${k} class="key num" aria-label=${k === 'del' ? 'Backspace' : k} onClick=${() => setF(s => pressKey(s, k))}>
+          ${k === 'del' ? html`<${Icon} d=${I.del} />` : k}</button>`)}</div>
+      <button class="primary" disabled=${busy} onClick=${save}>${busy ? 'Saving…' : 'Save'}</button>`}>
+    <button class=${'big num kind-' + f.kind + (bigKey && f.active !== bigKey ? ' idle' : '')} onClick=${() => { document.activeElement?.blur(); if (bigKey) up({ active: bigKey }); }}>
+      <span class="rp">Rp</span>${bigValue ? fmt(bigValue) : html`<span class="dim">0</span>`}</button>
+    ${!bigKey && html`<div class="note" style="justify-content:center;margin-top:0">${f.kind === 'custom' ? 'Net' : 'Total'} of the lines below</div>`}
+    <div class="lbl">Type</div>
+    <div class="chips">${[['out', 'Expense'], ['in', 'Income'], ['transfer', 'Transfer'], ...(f.kind === 'custom' ? [['custom', 'Custom']] : [])].map(([k, label]) => html`
+      <button key=${k} class=${'chip kind-chip kind-' + k + (f.kind === k ? ' on' : '')} onClick=${() => setKind(k)}>${label}</button>`)}</div>
+    ${pocketArea}
+    ${f.kind !== 'transfer' && html`<div class="lbl">Name</div>
+    <input class="input" value=${f.name}
+      onInput=${e => up({ name: e.target.value })} enterkeyhint="done" onKeyDown=${e => e.key === 'Enter' && e.target.blur()} />
+`}
+    <div class="lbl">Date</div>
+    <div class="chips"><label class="chip on">${dayLabel(f.date)}
+      <input type="date" value=${f.date} onInput=${e => e.target.value && up({ date: e.target.value })} /></label>
+      ${f.date !== today() && html`<button class="chip" onClick=${() => up({ date: today() })}>Today</button>`}</div>
+    ${f.kind !== 'transfer' && html`<div class="lbl">Category</div>
+    <div class="chips">
+      ${cats.map(c => html`<button key=${c.id} class=${'chip' + (f.categoryId === c.id ? ' on' : '')} onClick=${() => up({ categoryId: c.id })}>${c.name}</button>`)}</div>`}
+  <//>`;
+}
+
+// ---- Budget ----------------------------------------------------------------------------
+function BudgetScreen(ctx) {
+  const [view, setView] = usePersisted('trax.budgetView', 'now');
+  const next = addMonths(curMonth(), 1);
+  return html`<div class="screen">
+    <div class="title"><span>Budget</span></div>
+    <${Seg} value=${view} onChange=${setView} options=${[['now', parseISO(curMonth()).toLocaleDateString('en-GB', { month: 'short' }) + ' (active)'],
+      ['next', parseISO(next).toLocaleDateString('en-GB', { month: 'short' }) + ' (draft)'], ['cats', 'Categories']]} />
+    ${view === 'next' ? html`<${BudgetDraft} ...${ctx} />` : view === 'cats' ? html`<${Categories} ...${ctx} />` : html`<${BudgetNow} ...${ctx} />`}
+  </div>`;
+}
+
+function BudgetNow({ data, ver }) {
+  const [state, setState] = useState(null);
+  const [err, setErr] = useState(null);
+  useEffect(() => {
+    let live = true;
+    Promise.all([store.period(curMonth()), store.month(curMonth())])
+      .then(([period, txs]) => live && setState({ period, txs })).catch(e => live && setErr(e.message));
+    return () => { live = false; };
+  }, [ver]);
+  if (err) return html`<div class="empty neg">${err}</div>`;
+  if (!state) return html`<${Loading} />`;
+
+  const { period, txs } = state;
+  const used = usage(txs);
+  const cat = id => data.categories.find(c => c.id === id);
+  const t = totals(data);
+  const items = period.items.map(i => ({ ...i, spent: -(used[i.category_id] || 0) }));
+  const budgeted = new Set(items.map(i => i.category_id));
+  const outside = Object.entries(used).filter(([id, v]) => !budgeted.has(id) && cat(id)?.kind === 'expense' && v < 0);
+  const received = Object.entries(used).filter(([id]) => cat(id)?.kind === 'income').reduce((s, [, v]) => s + v, 0);
+  const totalBudget = items.reduce((s, i) => s + i.total, 0);
+  const totalSpent = items.reduce((s, i) => s + i.spent, 0);
+  // Mirrors the sheet's Expected EOMB: what is left to spend is still to leave the balance,
+  // what is left to receive is still to arrive. Overspent lines count as zero remaining.
+  const expLeft = items.reduce((s, i) => s + Math.max(0, i.total - i.spent), 0);
+  const incomeLeft = Math.max(0, period.income - received);
+  const expected = t.balance + incomeLeft + t.ar - expLeft - t.ap;
+  const cond = expected - period.target_eomb;
+
+  return html`
+    <div class="note"><${Icon} d=${I.lock} size=${14} />Locked since 1 ${monthLabel(curMonth())}. Changes go into next month's draft.</div>
+    <div class="card">
+      <div class="stat"><span class="mut">Projected end of month</span><b class="num">${expected < 0 ? '−' : ''}${fmt(expected)}</b></div>
+      <div class="stat"><span class="mut">Target</span><span class="num">${fmt(period.target_eomb)}</span></div>
+      <div class="stat total"><span>${cond >= 0 ? 'On track' : 'Short'}</span><span class=${'num ' + (cond >= 0 ? 'pos' : 'neg')}>${fmtSigned(cond)}</span></div>
+    </div>
+    <div class="card">
+      <div class="stat"><span class="mut">Balance</span><span class="num">${fmt(t.balance)}</span></div>
+      <div class="stat"><span class="mut">+ Income still due</span><span class="num">${fmt(incomeLeft)}</span></div>
+      <div class="stat"><span class="mut">+ AR</span><span class="num">${fmt(t.ar)}</span></div>
+      <div class="stat"><span class="mut">− Budget left to spend</span><span class="num">${fmt(expLeft)}</span></div>
+      <div class="stat"><span class="mut">− AP</span><span class="num">${fmt(t.ap)}</span></div>
+    </div>
+    <div class="section-h"><span>Spending</span><span class="num">${fmt(totalSpent)} / ${fmt(totalBudget)}</span></div>
+    ${!items.length ? html`<div class="card"><div class="empty">No budget for this month. Build one in the draft tab — it takes effect next month.</div></div>`
+      : html`<div class="card">${items.map(i => {
+        const left = i.total - i.spent;
+        return html`<div class="row" key=${i.id} style="display:block">
+          <div style="display:flex;justify-content:space-between;gap:12px"><span class="row-title">${cat(i.category_id)?.name ?? '?'}</span>
+            <span class="num ${left < 0 ? 'neg' : 'mut'}" style="font-size:14px">${left < 0 ? fmt(left) + ' over' : fmt(left) + ' left'}</span></div>
+          <div class="bar ${left < 0 ? 'over' : ''}"><i style=${`width:${i.total ? Math.min(100, (i.spent / i.total) * 100) : i.spent > 0 ? 100 : 0}%`}></i></div>
+          <div class="row-sub num">${fmt(i.spent)} of ${fmt(i.total)}</div></div>`;
+      })}</div>`}
+    ${outside.length > 0 && html`<div class="section-h"><span>Outside the budget</span></div>
+      <div class="card">${outside.map(([id, v]) => html`<div class="row" key=${id}><div class="row-main">${cat(id).name}</div>
+        <div class="row-amt num">${fmt(v)}</div></div>`)}</div>`}
+    <div class="section-h"><span>Income</span><span class="num">${fmt(received)} / ${fmt(period.income)}</span></div>`;
+}
+
+function BudgetDraft({ data, ver, open }) {
+  const month = addMonths(curMonth(), 1);
+  const [period, setPeriod] = useState(null);
+  const [err, setErr] = useState(null);
+  useEffect(() => {
+    let live = true;
+    store.period(month).then(p => live && setPeriod(p)).catch(e => live && setErr(e.message));
+    return () => { live = false; };
+  }, [ver]);
+  if (err) return html`<div class="empty neg">${err}</div>`;
+  if (!period) return html`<${Loading} />`;
+
+  const cat = id => data.categories.find(c => c.id === id);
+  const total = period.items.reduce((s, i) => s + i.total, 0);
+  return html`
+    <div class="note">Takes effect on 1 ${monthLabel(month)}, then locks.</div>
+    <div class="card">
+      <button class="row" onClick=${() => open('period', { period })}><div class="row-main">Income</div><div class="row-amt num">${fmt(period.income)}</div></button>
+      <div class="row"><div class="row-main mut">Total budget</div><div class="row-amt num">${fmt(total)}</div></div>
+      <div class="row"><div class="row-main mut">Target saving</div><div class="row-amt num ${period.income - total < 0 ? 'neg' : 'pos'}">${fmtSigned(period.income - total)}</div></div>
+      <button class="row" onClick=${() => open('period', { period })}><div class="row-main">Target end-of-month balance</div><div class="row-amt num">${fmt(period.target_eomb)}</div></button>
+    </div>
+    <div class="section-h"><span>Budget lines</span></div>
+    <div class="card">
+      ${period.items.map(i => html`<button class="row" key=${i.id} onClick=${() => open('item', { period, item: i })}>
+        <div class="row-main"><div class="row-title">${cat(i.category_id)?.name ?? '?'}</div>
+          <div class="row-sub num">${fmt(i.price)} × ${i.qty} ${i.unit}</div></div>
+        <div class="row-amt num">${fmt(i.total)}</div></button>`)}
+      <button class="add" onClick=${() => open('item', { period })}><${Icon} d=${I.plus} size=${18} />Add line</button>
+    </div>`;
+}
+
+function ItemSheet({ data, period, item, onClose, onDone }) {
+  const free = data.categories.filter(c => c.kind === 'expense' && !c.archived && !period.items.some(i => i.category_id === c.id));
+  const [catId, setCatId] = useState(item?.category_id ?? (free[0]?.id || '__new'));
+  const [newName, setNewName] = useState('');
+  const [price, setPrice] = useState(item ? String(item.price) : '');
+  const [unit, setUnit] = useState(item?.unit ?? 'Month');
+  const [qty, setQty] = useState(item ? String(item.qty) : '1');
+  const [busy, setBusy] = useState(false);
+
+  const save = async () => {
+    if (catId === '__new' && !newName.trim()) return toast('Enter a category name');
+    setBusy(true);
+    try {
+      const row = { price: num(price), unit, qty: Number(qty) || 0 };
+      if (item) await store.saveItem(period.id, item.id, row);
+      else {
+        const category_id = catId === '__new' ? await store.saveCategory(null, { name: newName.trim(), kind: 'expense' }) : catId;
+        await store.saveItem(period.id, null, { ...row, category_id });
+      }
+      onDone();
+    } catch (e) { toast(e.message); setBusy(false); }
+  };
+  const remove = async () => {
+    try { await store.deleteItem(item); onDone(); } catch (e) { toast(e.message); }
+  };
+
+  return html`<${Panel} title=${item ? data.categories.find(c => c.id === item.category_id)?.name : 'Add line'} onClose=${onClose}
+    right=${html`<button class="link" disabled=${busy} onClick=${save}>Save</button>`}>
+    ${!item && html`<div class="field"><span>Category</span><select value=${catId} onChange=${e => setCatId(e.target.value)}>
+      ${free.map(c => html`<option value=${c.id}>${c.name}</option>`)}<option value="__new">+ New category</option></select></div>
+      ${catId === '__new' && html`<div class="field"><span>Category name</span><input value=${newName} onInput=${e => setNewName(e.target.value)} /></div>`}`}
+    <div class="field"><span>Price</span><input inputmode="numeric" placeholder="0" value=${price ? fmt(price) : ''} onInput=${e => setPrice(digits(e.target.value))} /></div>
+    <div class="field"><span>Unit</span><select value=${unit} onChange=${e => setUnit(e.target.value)}>${UNITS.map(u => html`<option>${u}</option>`)}</select></div>
+    <div class="field"><span>Quantity</span><input inputmode="decimal" value=${qty} onInput=${e => setQty(e.target.value.replace(',', '.').replace(/[^\d.]/g, ''))} /></div>
+    <div class="field"><span>Total</span><b class="num">${fmt(num(price) * (Number(qty) || 0))}</b></div>
+    ${item && html`<button class="secondary danger" style="margin-top:20px" onClick=${remove}>Remove from budget</button>`}
+  <//>`;
+}
+
+function PeriodSheet({ period, onClose, onDone }) {
+  const [income, setIncome] = useState(String(period.income));
+  const [target, setTarget] = useState(String(period.target_eomb));
+  const save = async () => {
+    try { await store.savePeriod(period.id, { income: num(income), target_eomb: num(target) }); onDone(); }
+    catch (e) { toast(e.message); }
+  };
+  return html`<${Panel} title=${'Budget ' + monthLabel(period.month)} onClose=${onClose}
+    right=${html`<button class="link" onClick=${save}>Save</button>`}>
+    <div class="field"><span>Income</span><input inputmode="numeric" value=${income ? fmt(income) : ''} placeholder="0" onInput=${e => setIncome(digits(e.target.value))} /></div>
+    <div class="field"><span>Target end-of-month balance</span><input inputmode="numeric" value=${target ? fmt(target) : ''} placeholder="0" onInput=${e => setTarget(digits(e.target.value))} /></div>
+  <//>`;
+}
+
+function Categories({ data, open }) {
+  const [showArchived, setShowArchived] = useState(false);
+  const list = kind => data.categories.filter(c => c.kind === kind && !c.archived);
+  const archived = data.categories.filter(c => c.archived);
+  const rows = cs => cs.map(c => html`<button class="row" key=${c.id} onClick=${() => open('category', { category: c })}>
+    <div class="row-main ${c.archived ? 'mut' : ''}">${c.name}</div></button>`);
+  return html`
+    <div class="section-h"><span>Expense</span></div>
+    <div class="card">${rows(list('expense'))}
+      <button class="add" onClick=${() => open('category', { kind: 'expense' })}><${Icon} d=${I.plus} size=${18} />Expense category</button></div>
+    <div class="section-h"><span>Income</span></div>
+    <div class="card">${rows(list('income'))}
+      <button class="add" onClick=${() => open('category', { kind: 'income' })}><${Icon} d=${I.plus} size=${18} />Income category</button></div>
+    ${archived.length > 0 && html`<button class="note" onClick=${() => setShowArchived(!showArchived)}>${showArchived ? 'Hide' : 'Show'} ${archived.length} archived categor${archived.length > 1 ? 'ies' : 'y'}</button>
+      ${showArchived && html`<div class="card">${rows(archived)}</div>`}`}`;
+}
+
+function CategorySheet({ category, kind: kind0, onClose, onDone }) {
+  const [name, setName] = useState(category?.name ?? '');
+  const [kind, setKind] = useState(category?.kind ?? kind0 ?? 'expense');
+  const save = async () => {
+    if (!name.trim()) return toast('Category name is required');
+    try {
+      await store.saveCategory(category?.id ?? null, { name: name.trim(), kind });
+      onDone();
+    } catch (e) { toast(e.message); }
+  };
+  const toggleArchive = async () => {
+    try { await store.archiveCategory(category.id, !category.archived); onDone(); } catch (e) { toast(e.message); }
+  };
+  return html`<${Panel} title=${category ? 'Edit category' : 'New category'} onClose=${onClose}
+    right=${html`<button class="link" onClick=${save}>Save</button>`}>
+    <div class="field"><span>Name</span><input value=${name} onInput=${e => setName(e.target.value)} /></div>
+    <div style="margin-top:8px"><${Seg} value=${kind} onChange=${setKind} options=${[['expense', 'Expense'], ['income', 'Income']]} /></div>
+    ${category && html`<button class="secondary ${category.archived ? '' : 'danger'}" style="margin-top:20px" onClick=${toggleArchive}>
+      ${category.archived ? 'Restore category' : 'Archive category'}</button>
+      <div class="note">Renaming applies to past transactions too. Archiving hides the category from input and removes it from next month's draft.</div>`}
+  <//>`;
+}
+
+// ---- AR / AP ---------------------------------------------------------------------------
+function DebtScreen({ data, open }) {
+  const [kind, setKind] = usePersisted('trax.debtKind', 'AR');
+  const [showSettled, setShowSettled] = useState(false);
+  const items = data.debts.filter(d => d.kind === kind);
+  const openItems = items.filter(d => !d.settled_at);
+  const settled = items.filter(d => d.settled_at);
+  const row = d => html`<button class="row" key=${d.id} onClick=${() => open('debt', { debt: d })}>
+    <div class="row-main"><div class="row-title ${d.settled_at ? 'mut' : ''}">${d.name}</div>
+      <div class="row-sub">${dayLabel(d.date)}${d.settled_at ? ' · settled ' + dayLabel(d.settled_at) : ''}</div></div>
+    <div class="row-amt num ${d.settled_at ? 'mut' : ''}">${fmt(d.amount)}</div></button>`;
+  return html`<div class="screen">
+    <div class="title"><span>AR & AP</span></div>
+    <${Seg} value=${kind} onChange=${setKind} options=${[['AR', 'Receivables'], ['AP', 'Payables']]} />
+    <div class="hero"><div class="hero-label">${kind === 'AR' ? 'Owed to you' : 'Owed to others'}</div>
+      <div class="hero-num num">Rp ${fmt(openItems.reduce((s, d) => s + d.amount, 0))}</div></div>
+    <div class="card">${openItems.map(row)}
+      <button class="add" onClick=${() => open('debt', { kind })}><${Icon} d=${I.plus} size=${18} />Add ${kind === 'AR' ? 'receivable' : 'payable'}</button></div>
+    ${settled.length > 0 && html`<button class="note" onClick=${() => setShowSettled(!showSettled)}>${showSettled ? 'Hide' : 'Show'} ${settled.length} settled</button>
+      ${showSettled && html`<div class="card">${settled.map(row)}</div>`}`}
+  </div>`;
+}
+
+function DebtSheet({ data, debt, kind: kind0, onClose, onDone }) {
+  const active = data.pockets.filter(p => !p.archived);
+  const last = lsGet('trax.lastPocket');
+  const defPocket = active.some(p => p.id === last) ? last : active[0]?.id ?? null;
+  const txPocket = id => store.txPocket(id);
+  const [kind, setKind] = useState(debt?.kind ?? kind0 ?? 'AR');
+  const [date, setDate] = useState(debt?.date ?? today());
+  const [name, setName] = useState(debt?.name ?? '');
+  const [amount, setAmount] = useState(debt ? String(Math.round(debt.amount)) : '');
+  // null = "Not sure": record no transaction (also for debts already reflected in the balances).
+  const [pocket, setPocket] = useState(debt ? txPocket(debt.open_tx_id) : defPocket);
+  const [settlePocket, setSettlePocket] = useState(defPocket);
+
+  const save = async () => {
+    if (!name.trim() || !num(amount)) return toast('Enter a name and an amount');
+    try {
+      await store.saveDebt(debt?.id ?? null, { kind, date, name: name.trim(), amount: num(amount) }, pocket);
+      if (pocket) lsSet('trax.lastPocket', pocket);
+      onDone();
+    } catch (e) { toast(e.message); }
+  };
+  const settle = async () => {
+    try {
+      if (debt.settled_at) await store.unsettleDebt(debt.id);
+      else await store.settleDebt(debt.id, settlePocket);
+      onDone();
+    } catch (e) { toast(e.message); }
+  };
+  const remove = async () => {
+    if (!confirm(`Delete "${debt.name}" and its transactions?`)) return;
+    try { await store.deleteDebt(debt.id); onDone(); } catch (e) { toast(e.message); }
+  };
+  // "Not sure" comes first so it is visible without scrolling: forgetting which pocket paid is
+  // common, and then no transaction is recorded (fix the balance later with "Set balance to").
+  const pocketChips = (value, onPick) => html`<div class="chips">
+    <button class=${'chip' + (!value ? ' on' : '')} onClick=${() => onPick(null)}>Not sure</button>
+    ${active.map(p => html`<button key=${p.id} class=${'chip' + (value === p.id ? ' on' : '')} onClick=${() => onPick(p.id)}>${p.name}</button>`)}</div>`;
+
+  return html`<${Panel} title=${(debt ? 'Edit ' : 'Add ') + (kind === 'AR' ? 'receivable' : 'payable')} onClose=${onClose}
+    right=${html`<button class="link" onClick=${save}>Save</button>`}>
+    <${Seg} value=${kind} onChange=${setKind} options=${[['AR', 'Receivable'], ['AP', 'Payable']]} />
+    <div class="field"><span>Description</span><input value=${name} onInput=${e => setName(e.target.value)} /></div>
+    <div class="field"><span>Amount</span><input inputmode="numeric" placeholder="0" value=${amount ? fmt(amount) : ''} onInput=${e => setAmount(digits(e.target.value))} /></div>
+    <div class="field"><span>Date</span><input type="date" value=${date} onInput=${e => e.target.value && setDate(e.target.value)} /></div>
+    <div class="lbl">${kind === 'AR' ? 'Paid from' : 'Received into'}</div>
+    ${pocketChips(pocket, setPocket)}
+    ${debt && !debt.settled_at && html`
+      <div class="lbl">${kind === 'AR' ? 'Repaid into' : 'Paid back from'}</div>
+      ${pocketChips(settlePocket, setSettlePocket)}`}
+    ${debt && html`<button class="secondary" style="margin-top:20px" onClick=${settle}>${debt.settled_at ? 'Mark as unsettled' : 'Mark as settled'}</button>
+      <button class="secondary danger" onClick=${remove}>Delete</button>`}
+  <//>`;
+}
+
+// Handle for poking at the prototype from the console.
+window.__trax = { store, curMonth };
+render(html`<${App} />`, document.getElementById('root'));
+</script>
+</body>
+</html>
